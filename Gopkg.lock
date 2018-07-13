@@ -638,7 +638,7 @@
   revision = "6ac8c5d890d415025dd5aae7595bcb2a6e7e2fad"
 
 [[projects]]
-  branch = "master"
+  branch = "dev"
   name = "github.com/prometheus/prometheus"
   packages = [
     "config",
@@ -680,7 +680,8 @@
     "util/treecache",
     "web/api/v1"
   ]
-  revision = "504acf4a0aec394fa7993dc2fe5744ef59f97b2c"
+  revision = "1b957b9902b4f724be05b74d2428083964564538"
+  source = "github.com/tomwilkie/prometheus"
 
 [[projects]]
   branch = "master"

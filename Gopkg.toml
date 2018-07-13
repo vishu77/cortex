@@ -22,7 +22,8 @@
 # vendor updates less huge (if updated frequently).
 [[constraint]]
   name = "github.com/prometheus/prometheus"
-  branch = "master"
+  branch = "dev"
+  source = "github.com/tomwilkie/prometheus"
 
 # Similar to prometheus/prometheus, we want to track upstream master.
 [[constraint]]
