@@ -17,6 +17,10 @@ func (m mockStore) Put(ctx context.Context, chunks []Chunk) error {
 	return nil
 }
 
+func (m mockStore) PutOne(ctx context.Context, from, through model.Time, chunk Chunk) error {
+	return nil
+}
+
 func (m mockStore) Get(tx context.Context, from, through model.Time, matchers ...*labels.Matcher) ([]Chunk, error) {
 	return nil, nil
 }
