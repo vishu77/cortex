@@ -11,6 +11,10 @@ type StorageClient interface {
 	// For the read path.
 	QueryPages(ctx context.Context, query IndexQuery, callback func(result ReadBatch) (shouldContinue bool)) error
 
+	// For fixups
+	QueryRows(ctx context.Context, tableName, prefix string, callback func(result ReadBatch) (shouldContinue bool)) error
+	NewDeleteBatch() WriteBatch
+
 	// For storing and retrieving chunks.
 	PutChunks(ctx context.Context, chunks []Chunk) error
 	GetChunks(ctx context.Context, chunks []Chunk) ([]Chunk, error)
@@ -24,6 +28,7 @@ type WriteBatch interface {
 // ReadBatch represents the results of a QueryPages.
 type ReadBatch interface {
 	Len() int
+	HashValue(index int) string // NB only implemented for the BigTable client
 	RangeValue(index int) []byte
 	Value(index int) []byte
 }

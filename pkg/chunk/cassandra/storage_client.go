@@ -110,8 +110,11 @@ func (cfg *Config) createKeyspace() error {
 	return errors.WithStack(err)
 }
 
-// storageClient implements chunk.storageClient for GCP.
+// storageClient implements chunk.storageClient for Cassandra.
 type storageClient struct {
+	// Embed the interface to make changes less brittle.
+	chunk.StorageClient
+
 	cfg       Config
 	schemaCfg chunk.SchemaConfig
 	session   *gocql.Session
@@ -222,6 +225,10 @@ type readBatch struct {
 // one-by-one, so this always returns 1.
 func (readBatch) Len() int {
 	return 1
+}
+
+func (readBatch) HashValue(index int) string {
+	panic("not implemented")
 }
 
 func (b readBatch) RangeValue(index int) []byte {

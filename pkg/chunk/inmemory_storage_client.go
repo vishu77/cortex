@@ -14,6 +14,9 @@ import (
 
 // MockStorage is a fake in-memory StorageClient.
 type MockStorage struct {
+	// Embed the interface to make changes less brittle.
+	StorageClient
+
 	mtx     sync.RWMutex
 	tables  map[string]*mockTable
 	objects map[string][]byte
@@ -294,6 +297,10 @@ type mockReadBatch []mockItem
 
 func (b mockReadBatch) Len() int {
 	return len(b)
+}
+
+func (mockReadBatch) HashValue(int) string {
+	panic("not implemented")
 }
 
 func (b mockReadBatch) RangeValue(i int) []byte {

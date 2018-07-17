@@ -37,6 +37,9 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 
 // storageClient implements chunk.storageClient for GCP.
 type storageClient struct {
+	// Embed the interface to make changes less brittle.
+	chunk.StorageClient
+
 	cfg       Config
 	schemaCfg chunk.SchemaConfig
 	client    *bigtable.Client
@@ -82,6 +85,29 @@ func (b bigtableWriteBatch) Add(tableName, hashValue string, rangeValue []byte, 
 	}
 
 	mutation.Set(columnFamily, column, 0, value)
+}
+
+type bigtableDeleteBatch struct {
+	bigtableWriteBatch
+}
+
+func (b bigtableDeleteBatch) Add(tableName, hashValue string, rangeValue []byte, value []byte) {
+	rows, ok := b.tables[tableName]
+	if !ok {
+		rows = map[string]*bigtable.Mutation{}
+		b.tables[tableName] = rows
+	}
+
+	// TODO the hashValue should actually be hashed - but I have data written in
+	// this format, so we need to do a proper migration.
+	rowKey := hashValue + separator + string(rangeValue)
+	mutation, ok := rows[rowKey]
+	if !ok {
+		mutation = bigtable.NewMutation()
+		rows[rowKey] = mutation
+	}
+
+	mutation.DeleteCellsInColumn(columnFamily, column)
 }
 
 func (s *storageClient) BatchWrite(ctx context.Context, batch chunk.WriteBatch) error {
@@ -158,6 +184,15 @@ func (bigtableReadBatch) Len() int {
 	return 1
 }
 
+func (b bigtableReadBatch) HashValue(index int) string {
+	if index != 0 {
+		panic("index != 0")
+	}
+	// String before the first separator is the hashkey
+	parts := strings.SplitN(bigtable.Row(b).Key(), separator, 2)
+	return parts[0]
+}
+
 func (b bigtableReadBatch) RangeValue(index int) []byte {
 	if index != 0 {
 		panic("index != 0")
@@ -176,6 +211,26 @@ func (b bigtableReadBatch) Value(index int) []byte {
 		panic("bad response from bigtable")
 	}
 	return cf[0].Value
+}
+
+func (s *storageClient) QueryRows(ctx context.Context, tableName, prefix string, callback func(result chunk.ReadBatch) (shouldContinue bool)) error {
+	table := s.client.Open(tableName)
+	rowRange := bigtable.PrefixRange(prefix)
+	err := table.ReadRows(ctx, rowRange, func(r bigtable.Row) bool {
+		return callback(bigtableReadBatch(r))
+	})
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
+}
+
+func (s *storageClient) NewDeleteBatch() chunk.WriteBatch {
+	return bigtableDeleteBatch{
+		bigtableWriteBatch: bigtableWriteBatch{
+			tables: map[string]map[string]*bigtable.Mutation{},
+		},
+	}
 }
 
 func (s *storageClient) PutChunks(ctx context.Context, chunks []chunk.Chunk) error {

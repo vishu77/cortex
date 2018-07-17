@@ -143,6 +143,9 @@ func (cfg *StorageConfig) RegisterFlags(f *flag.FlagSet) {
 }
 
 type storageClient struct {
+	// Embed the interface to make changes less brittle.
+	chunk.StorageClient
+
 	cfg       StorageConfig
 	schemaCfg chunk.SchemaConfig
 
@@ -774,6 +777,10 @@ type dynamoDBReadResponse []map[string]*dynamodb.AttributeValue
 
 func (b dynamoDBReadResponse) Len() int {
 	return len(b)
+}
+
+func (dynamoDBReadResponse) HashValue(int) string {
+	panic("not implemented")
 }
 
 func (b dynamoDBReadResponse) RangeValue(i int) []byte {

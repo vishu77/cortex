@@ -6,6 +6,7 @@ cmd/querier/querier
 cmd/ruler/ruler
 cmd/table-manager/table-manager
 cmd/lite/lite
+cmd/fixer/fixer
 .uptodate
 .pkg
 .cache
