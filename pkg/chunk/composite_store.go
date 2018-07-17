@@ -12,6 +12,7 @@ import (
 // Store for chunks.
 type Store interface {
 	Put(ctx context.Context, chunks []Chunk) error
+	PutOne(ctx context.Context, from, through model.Time, chunk Chunk) error
 	Get(tx context.Context, from, through model.Time, matchers ...*labels.Matcher) ([]Chunk, error)
 	Stop()
 }
@@ -118,14 +119,20 @@ func NewCompositeStore(cfg StoreConfig, schemaCfg SchemaConfig, storage StorageC
 
 func (c compositeStore) Put(ctx context.Context, chunks []Chunk) error {
 	for _, chunk := range chunks {
-		err := c.forStores(chunk.From, chunk.Through, func(_, _ model.Time, store Store) error {
-			return store.Put(ctx, []Chunk{chunk})
+		err := c.forStores(chunk.From, chunk.Through, func(from, through model.Time, store Store) error {
+			return store.PutOne(ctx, from, through, chunk)
 		})
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c compositeStore) PutOne(ctx context.Context, from, through model.Time, chunk Chunk) error {
+	return c.forStores(from, through, func(from, through model.Time, store Store) error {
+		return store.PutOne(ctx, from, through, chunk)
+	})
 }
 
 func (c compositeStore) Get(ctx context.Context, from, through model.Time, matchers ...*labels.Matcher) ([]Chunk, error) {

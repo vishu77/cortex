@@ -13,13 +13,13 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/weaveworks/cortex/pkg/prom1/storage/local/chunk"
-	"github.com/weaveworks/cortex/pkg/util"
-	"github.com/weaveworks/cortex/pkg/util/extract"
 	"golang.org/x/net/context"
 
 	"github.com/weaveworks/common/test"
 	"github.com/weaveworks/common/user"
+	"github.com/weaveworks/cortex/pkg/prom1/storage/local/chunk"
+	"github.com/weaveworks/cortex/pkg/util"
+	"github.com/weaveworks/cortex/pkg/util/extract"
 )
 
 type schemaFactory func(cfg SchemaConfig) Schema

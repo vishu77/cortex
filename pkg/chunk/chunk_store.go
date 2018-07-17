@@ -93,10 +93,25 @@ func (c *store) Stop() {
 
 // Put implements ChunkStore
 func (c *store) Put(ctx context.Context, chunks []Chunk) error {
+	for _, chunk := range chunks {
+		if err := c.PutOne(ctx, chunk.From, chunk.Through, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PutOne implements ChunkStore
+func (c *store) PutOne(ctx context.Context, from, through model.Time, chunk Chunk) error {
 	userID, err := user.ExtractOrgID(ctx)
 	if err != nil {
 		return err
 	}
+
+	// Horribly, PutChunks mutates the chunk by setting its checksum.  By putting
+	// the chunk in a slice we are in fact passing by reference, so below we
+	// need to make sure we pick the chunk back out the slice.
+	chunks := []Chunk{chunk}
 
 	err = c.storage.PutChunks(ctx, chunks)
 	if err != nil {
@@ -104,11 +119,8 @@ func (c *store) Put(ctx context.Context, chunks []Chunk) error {
 	}
 
 	c.writeBackCache(ctx, chunks)
-	return c.updateIndex(ctx, userID, chunks)
-}
 
-func (c *store) updateIndex(ctx context.Context, userID string, chunks []Chunk) error {
-	writeReqs, err := c.calculateIndexEntries(userID, chunks)
+	writeReqs, err := c.calculateIndexEntries(userID, from, through, chunks[0])
 	if err != nil {
 		return err
 	}
@@ -117,33 +129,31 @@ func (c *store) updateIndex(ctx context.Context, userID string, chunks []Chunk) 
 }
 
 // calculateIndexEntries creates a set of batched WriteRequests for all the chunks it is given.
-func (c *store) calculateIndexEntries(userID string, chunks []Chunk) (WriteBatch, error) {
+func (c *store) calculateIndexEntries(userID string, from, through model.Time, chunk Chunk) (WriteBatch, error) {
 	seenIndexEntries := map[string]struct{}{}
 
-	writeReqs := c.storage.NewWriteBatch()
-	for _, chunk := range chunks {
-		metricName, err := extract.MetricNameFromMetric(chunk.Metric)
-		if err != nil {
-			return nil, err
-		}
+	metricName, err := extract.MetricNameFromMetric(chunk.Metric)
+	if err != nil {
+		return nil, err
+	}
 
-		entries, err := c.schema.GetWriteEntries(chunk.From, chunk.Through, userID, metricName, chunk.Metric, chunk.ExternalKey())
-		if err != nil {
-			return nil, err
-		}
-		indexEntriesPerChunk.Observe(float64(len(entries)))
+	entries, err := c.schema.GetWriteEntries(from, through, userID, metricName, chunk.Metric, chunk.ExternalKey())
+	if err != nil {
+		return nil, err
+	}
+	indexEntriesPerChunk.Observe(float64(len(entries)))
 
-		// Remove duplicate entries based on tableName:hashValue:rangeValue
-		for _, entry := range entries {
-			key := fmt.Sprintf("%s:%s:%x", entry.TableName, entry.HashValue, entry.RangeValue)
-			if _, ok := seenIndexEntries[key]; !ok {
-				seenIndexEntries[key] = struct{}{}
-				rowWrites.Observe(entry.HashValue, 1)
-				writeReqs.Add(entry.TableName, entry.HashValue, entry.RangeValue, entry.Value)
-			}
+	// Remove duplicate entries based on tableName:hashValue:rangeValue
+	result := c.storage.NewWriteBatch()
+	for _, entry := range entries {
+		key := fmt.Sprintf("%s:%s:%x", entry.TableName, entry.HashValue, entry.RangeValue)
+		if _, ok := seenIndexEntries[key]; !ok {
+			seenIndexEntries[key] = struct{}{}
+			rowWrites.Observe(entry.HashValue, 1)
+			result.Add(entry.TableName, entry.HashValue, entry.RangeValue, entry.Value)
 		}
 	}
-	return writeReqs, nil
+	return result, nil
 }
 
 // Get implements Store
