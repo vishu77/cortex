@@ -111,7 +111,11 @@ func (b bigtableDeleteBatch) Add(tableName, hashValue string, rangeValue []byte,
 }
 
 func (s *storageClient) BatchWrite(ctx context.Context, batch chunk.WriteBatch) error {
-	bigtableBatch := batch.(bigtableWriteBatch)
+	bigtableBatch, ok := batch.(bigtableWriteBatch)
+	if !ok {
+		deleteBatch := batch.(bigtableDeleteBatch)
+		bigtableBatch = deleteBatch.bigtableWriteBatch
+	}
 
 	for tableName, rows := range bigtableBatch.tables {
 		table := s.client.Open(tableName)

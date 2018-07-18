@@ -55,7 +55,7 @@ func (f *Fixer) Fix(ctx context.Context, userID string, from, through model.Time
 		log.Fatalln("expected to get same table name ", bucket.tableName, nextBucket.tableName)
 	}
 
-	f.rewrite = f.storage.NewWriteBatch()
+	f.rewrite = f.storage.NewDeleteBatch()
 	rewrites := 0
 
 	// For each row in the range we want, find all the entries.
@@ -82,7 +82,7 @@ func (f *Fixer) Fix(ctx context.Context, userID string, from, through model.Time
 			if err := f.storage.BatchWrite(ctx, f.rewrite); err != nil {
 				log.Fatalf("Error writing entries: %v", err)
 			}
-			f.rewrite = f.storage.NewWriteBatch()
+			f.rewrite = f.storage.NewDeleteBatch()
 			rewrites = 0
 		}
 
@@ -93,7 +93,7 @@ func (f *Fixer) Fix(ctx context.Context, userID string, from, through model.Time
 		if err := f.storage.BatchWrite(ctx, f.rewrite); err != nil {
 			log.Fatalf("Error writing entries: %v", err)
 		}
-		f.rewrite = f.storage.NewWriteBatch()
+		f.rewrite = f.storage.NewDeleteBatch()
 		rewrites = 0
 	}
 	f.report()
@@ -152,23 +152,23 @@ func (f *Fixer) processResult(tableName, hashValue string, rangeValue, value []b
 		}
 
 		f.seriesChunk++
-		newHashValue := fmt.Sprintf("%s:%s", nextBucket, hashValueParts[2])
+		//newHashValue := fmt.Sprintf("%s:%s", nextBucket, hashValueParts[2])
 		//fmt.Printf("Rewrite series -> chunk entry from %s -> %s (%s)\n", hashValue, newHashValue, rangeValue)
-		f.rewrite.Add(tableName, newHashValue, rangeValue, value)
+		f.rewrite.Add(tableName, hashValue, rangeValue, value)
 		return true
 
 	case bytes.Equal(version, seriesRangeKeyV1):
 		f.metricSeries++
-		newHashValue := fmt.Sprintf("%s:%s", nextBucket, hashValueParts[2])
+		//newHashValue := fmt.Sprintf("%s:%s", nextBucket, hashValueParts[2])
 		//fmt.Printf("Rewrite metric -> series entry from %s -> %s (%s)\n", hashValue, newHashValue, rangeValue)
-		f.rewrite.Add(tableName, newHashValue, rangeValue, value)
+		f.rewrite.Add(tableName, hashValue, rangeValue, value)
 		return true
 
 	case bytes.Equal(version, labelSeriesRangeKeyV1):
 		f.metricLabelSeries++
-		newHashValue := fmt.Sprintf("%s:%s:%s", nextBucket, hashValueParts[2], hashValueParts[3])
+		//newHashValue := fmt.Sprintf("%s:%s:%s", nextBucket, hashValueParts[2], hashValueParts[3])
 		//fmt.Printf("Rewrite metric, label -> series entry from %s -> %s (%s)\n", hashValue, newHashValue, rangeValue)
-		f.rewrite.Add(tableName, newHashValue, rangeValue, value)
+		f.rewrite.Add(tableName, hashValue, rangeValue, value)
 		return true
 
 	default:
