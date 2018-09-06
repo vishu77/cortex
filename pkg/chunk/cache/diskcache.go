@@ -33,7 +33,7 @@ var (
 		Help:      "total number entries evicted from the cache",
 	})
 
-	index *diskcacheIndex
+	globalCache *Diskcache
 )
 
 // TODO: in the future we could cuckoo hash or linear probe.
@@ -75,10 +75,22 @@ type Diskcache struct {
 	f       *os.File
 	buckets uint32
 	buf     []byte
+	index   *diskcacheIndex
 }
 
 // NewDiskcache creates a new on-disk cache.
 func NewDiskcache(cfg DiskcacheConfig) (*Diskcache, error) {
+	if globalCache == nil {
+		var err error
+		globalCache, err = newDiskcache(cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return globalCache, nil
+}
+
+func newDiskcache(cfg DiskcacheConfig) (*Diskcache, error) {
 	f, err := os.OpenFile(cfg.Path, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, errors.Wrap(err, "open")
@@ -102,14 +114,11 @@ func NewDiskcache(cfg DiskcacheConfig) (*Diskcache, error) {
 	buckets := uint32(len(buf) / bucketSize)
 	bucketsTotal.Set(float64(buckets)) // Report the number of buckets in the diskcache as a metric
 
-	if index == nil {
-		index = newDiskcacheIndex(buckets)
-	}
-
 	return &Diskcache{
 		f:       f,
 		buckets: buckets,
 		buf:     buf,
+		index:   newDiskcacheIndex(buckets),
 	}, nil
 }
 
@@ -138,9 +147,9 @@ func (d *Diskcache) Fetch(ctx context.Context, keys []string) (found []string, b
 func (d *Diskcache) fetch(key string) ([]byte, bool) {
 	bucket := hash(key) % d.buckets
 	shard := bucket % numMutexes // Get the index of the mutex associated with this bucket
-	index.entryMutexes[shard].RLock()
-	defer index.entryMutexes[shard].RUnlock()
-	if index.entries[bucket] != key {
+	d.index.entryMutexes[shard].RLock()
+	defer d.index.entryMutexes[shard].RUnlock()
+	if d.index.entries[bucket] != key {
 		return nil, false
 	}
 
@@ -159,13 +168,13 @@ func (d *Diskcache) fetch(key string) ([]byte, bool) {
 func (d *Diskcache) Store(ctx context.Context, key string, value []byte) error {
 	bucket := hash(key) % d.buckets
 	shard := bucket % numMutexes // Get the index of the mutex associated with this bucket
-	index.entryMutexes[shard].Lock()
-	defer index.entryMutexes[shard].Unlock()
-	if index.entries[bucket] == key { // If chunk is already cached return nil
+	d.index.entryMutexes[shard].Lock()
+	defer d.index.entryMutexes[shard].Unlock()
+	if d.index.entries[bucket] == key { // If chunk is already cached return nil
 		return nil
 	}
 
-	if index.entries[bucket] == "" {
+	if d.index.entries[bucket] == "" {
 		bucketsInitialized.Inc()
 	} else {
 		collisionsTotal.Inc()
@@ -174,11 +183,11 @@ func (d *Diskcache) Store(ctx context.Context, key string, value []byte) error {
 	buf := d.buf[bucket*bucketSize : (bucket+1)*bucketSize]
 	_, err := put(value, buf, 0)
 	if err != nil {
-		index.entries[bucket] = ""
+		d.index.entries[bucket] = ""
 		return err
 	}
 
-	index.entries[bucket] = key
+	d.index.entries[bucket] = key
 	return nil
 }
 
