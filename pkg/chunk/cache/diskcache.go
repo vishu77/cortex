@@ -164,7 +164,7 @@ func (d *Diskcache) fetch(key string) ([]byte, bool) {
 	return result, true
 }
 
-// StoreChunk puts a chunk into the cache.
+// Store puts a chunk into the cache.
 func (d *Diskcache) Store(ctx context.Context, key string, value []byte) error {
 	bucket := hash(key) % d.buckets
 	shard := bucket % numMutexes // Get the index of the mutex associated with this bucket
