@@ -50,12 +50,14 @@ var (
 type Config struct {
 	MaxOutstandingPerTenant int
 	MaxRetries              int
+	SplitQueriesByDay       bool
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet.
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.IntVar(&cfg.MaxOutstandingPerTenant, "querier.max-outstanding-requests-per-tenant", 100, "Maximum number of outstanding requests per tenant per frontend; requests beyond this error with HTTP 429.")
-	f.IntVar(&cfg.MaxRetries, "querier.max-retries-per-request", 5, "Maximum number of retries for a single request; beyon this, the downstream error is returned.")
+	f.IntVar(&cfg.MaxRetries, "querier.max-retries-per-request", 5, "Maximum number of retries for a single request; beyond this, the downstream error is returned.")
+	f.BoolVar(&cfg.SplitQueriesByDay, "querier.split-queries-by-day", false, "Split queries by day and execute in parallel.")
 }
 
 // Frontend queues HTTP requests, dispatches them to backends, and handles retries
@@ -84,7 +86,18 @@ func New(cfg Config, log log.Logger) (*Frontend, error) {
 		log:    log,
 		queues: map[string]chan *request{},
 	}
-	f.tracer.RoundTripper = f
+	var roundtripper http.RoundTripper = f
+	if cfg.SplitQueriesByDay {
+		roundtripper = &queryRangeRoundTripper{
+			downstream: f,
+			queryRangeMiddleware: &splitByDay{
+				downstream: &queryRangeTerminator{
+					downstream: f,
+				},
+			},
+		}
+	}
+	f.tracer.RoundTripper = roundtripper
 	f.cond = sync.NewCond(&f.mtx)
 	return f, nil
 }
