@@ -43,9 +43,9 @@ func fixtureWriteScale() chunk.AutoScalingConfig {
 
 func fixturePeriodicTableConfig(prefix string, inactLastN int64, writeScale, inactWriteScale chunk.AutoScalingConfig) chunk.PeriodicTableConfig {
 	return chunk.PeriodicTableConfig{
-		Prefix: prefix,
-		Period: tablePeriod,
-		From:   util.NewDayValue(model.TimeFromUnix(0)),
+		Prefix:                     prefix,
+		Period:                     tablePeriod,
+		From:                       util.NewDayValue(model.TimeFromUnix(0)),
 		ProvisionedWriteThroughput: write,
 		ProvisionedReadThroughput:  read,
 		InactiveWriteThroughput:    inactiveWrite,

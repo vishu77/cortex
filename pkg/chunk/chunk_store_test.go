@@ -91,25 +91,25 @@ func TestChunkStore_Get(t *testing.T) {
 
 	fooMetric1 := model.Metric{
 		model.MetricNameLabel: "foo",
-		"bar":  "baz",
-		"toms": "code",
-		"flip": "flop",
+		"bar":                 "baz",
+		"toms":                "code",
+		"flip":                "flop",
 	}
 	fooMetric2 := model.Metric{
 		model.MetricNameLabel: "foo",
-		"bar":  "beep",
-		"toms": "code",
+		"bar":                 "beep",
+		"toms":                "code",
 	}
 
 	// barMetric1 is a subset of barMetric2 to test over-matching bug.
 	barMetric1 := model.Metric{
 		model.MetricNameLabel: "bar",
-		"bar": "baz",
+		"bar":                 "baz",
 	}
 	barMetric2 := model.Metric{
 		model.MetricNameLabel: "bar",
-		"bar":  "baz",
-		"toms": "code",
+		"bar":                 "baz",
+		"toms":                "code",
 	}
 
 	fooChunk1 := dummyChunkFor(now, fooMetric1)
@@ -268,14 +268,14 @@ func TestChunkStore_getMetricNameChunks(t *testing.T) {
 	now := model.Now()
 	chunk1 := dummyChunkFor(now, model.Metric{
 		model.MetricNameLabel: "foo",
-		"bar":  "baz",
-		"toms": "code",
-		"flip": "flop",
+		"bar":                 "baz",
+		"toms":                "code",
+		"flip":                "flop",
 	})
 	chunk2 := dummyChunkFor(now, model.Metric{
 		model.MetricNameLabel: "foo",
-		"bar":  "beep",
-		"toms": "code",
+		"bar":                 "beep",
+		"toms":                "code",
 	})
 
 	for _, tc := range []struct {
@@ -374,7 +374,7 @@ func TestChunkStoreRandom(t *testing.T) {
 					model.Fingerprint(1),
 					model.Metric{
 						model.MetricNameLabel: "foo",
-						"bar": "baz",
+						"bar":                 "baz",
 					},
 					chunks[0],
 					ts,
@@ -438,7 +438,7 @@ func TestChunkStoreLeastRead(t *testing.T) {
 			model.Fingerprint(1),
 			model.Metric{
 				model.MetricNameLabel: "foo",
-				"bar": "baz",
+				"bar":                 "baz",
 			},
 			chunks[0],
 			ts,

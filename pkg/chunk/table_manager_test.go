@@ -106,9 +106,9 @@ func TestTableManager(t *testing.T) {
 	cfg := SchemaConfig{
 		UsePeriodicTables: true,
 		IndexTables: PeriodicTableConfig{
-			Prefix: tablePrefix,
-			Period: tablePeriod,
-			From:   util.NewDayValue(model.TimeFromUnix(0)),
+			Prefix:                     tablePrefix,
+			Period:                     tablePeriod,
+			From:                       util.NewDayValue(model.TimeFromUnix(0)),
 			ProvisionedWriteThroughput: write,
 			ProvisionedReadThroughput:  read,
 			InactiveWriteThroughput:    inactiveWrite,
@@ -119,9 +119,9 @@ func TestTableManager(t *testing.T) {
 		},
 
 		ChunkTables: PeriodicTableConfig{
-			Prefix: chunkTablePrefix,
-			Period: tablePeriod,
-			From:   util.NewDayValue(model.TimeFromUnix(0)),
+			Prefix:                     chunkTablePrefix,
+			Period:                     tablePeriod,
+			From:                       util.NewDayValue(model.TimeFromUnix(0)),
 			ProvisionedWriteThroughput: write,
 			ProvisionedReadThroughput:  read,
 			InactiveWriteThroughput:    inactiveWrite,
@@ -239,9 +239,9 @@ func TestTableManagerAutoscaleInactiveOnly(t *testing.T) {
 	cfg := SchemaConfig{
 		UsePeriodicTables: true,
 		IndexTables: PeriodicTableConfig{
-			Prefix: tablePrefix,
-			Period: tablePeriod,
-			From:   util.NewDayValue(model.TimeFromUnix(0)),
+			Prefix:                     tablePrefix,
+			Period:                     tablePeriod,
+			From:                       util.NewDayValue(model.TimeFromUnix(0)),
 			ProvisionedWriteThroughput: write,
 			ProvisionedReadThroughput:  read,
 			InactiveWriteThroughput:    inactiveWrite,
@@ -251,9 +251,9 @@ func TestTableManagerAutoscaleInactiveOnly(t *testing.T) {
 		},
 
 		ChunkTables: PeriodicTableConfig{
-			Prefix: chunkTablePrefix,
-			Period: tablePeriod,
-			From:   util.NewDayValue(model.TimeFromUnix(0)),
+			Prefix:                     chunkTablePrefix,
+			Period:                     tablePeriod,
+			From:                       util.NewDayValue(model.TimeFromUnix(0)),
 			ProvisionedWriteThroughput: write,
 			ProvisionedReadThroughput:  read,
 			InactiveWriteThroughput:    inactiveWrite,

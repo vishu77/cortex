@@ -66,7 +66,7 @@ func TestSchemaHashKeys(t *testing.T) {
 	labelBuckets := v4Schema(cfg)
 	metric := model.Metric{
 		model.MetricNameLabel: "foo",
-		"bar": "baz",
+		"bar":                 "baz",
 	}
 	chunkID := "chunkID"
 
@@ -195,8 +195,8 @@ func TestSchemaRangeKey(t *testing.T) {
 		v6RangeKeys   = v6Schema(cfg)
 		metric        = model.Metric{
 			model.MetricNameLabel: metricName,
-			"bar": "bary",
-			"baz": "bazy",
+			"bar":                 "bary",
+			"baz":                 "bazy",
 		}
 	)
 
