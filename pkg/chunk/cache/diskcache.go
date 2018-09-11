@@ -80,13 +80,14 @@ type Diskcache struct {
 
 // NewDiskcache creates a new on-disk cache.
 func NewDiskcache(cfg DiskcacheConfig) (*Diskcache, error) {
-	if globalCache == nil {
+	var once sync.Once
+	once.Do(func() {
 		var err error
 		globalCache, err = newDiskcache(cfg)
 		if err != nil {
-			return nil, err
+			panic(fmt.Sprintf("unable to initialize diskcache, %v", err))
 		}
-	}
+	})
 	return globalCache, nil
 }
 
