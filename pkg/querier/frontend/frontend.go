@@ -63,9 +63,9 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 // Frontend queues HTTP requests, dispatches them to backends, and handles retries
 // for requests which failed.
 type Frontend struct {
-	cfg    Config
-	log    log.Logger
-	tracer nethttp.Transport
+	cfg          Config
+	log          log.Logger
+	roundTripper http.RoundTripper
 
 	mtx    sync.Mutex
 	cond   *sync.Cond
@@ -86,9 +86,9 @@ func New(cfg Config, log log.Logger) (*Frontend, error) {
 		log:    log,
 		queues: map[string]chan *request{},
 	}
-	var roundtripper http.RoundTripper = f
+	var roundTripper http.RoundTripper = f
 	if cfg.SplitQueriesByDay {
-		roundtripper = &queryRangeRoundTripper{
+		roundTripper = &queryRangeRoundTripper{
 			downstream: f,
 			queryRangeMiddleware: &splitByDay{
 				downstream: &queryRangeTerminator{
@@ -97,7 +97,9 @@ func New(cfg Config, log log.Logger) (*Frontend, error) {
 			},
 		}
 	}
-	f.tracer.RoundTripper = roundtripper
+	f.roundTripper = &nethttp.Transport{
+		RoundTripper: roundTripper,
+	}
 	f.cond = sync.NewCond(&f.mtx)
 	return f, nil
 }
@@ -116,7 +118,7 @@ func (f *Frontend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), r)
 	defer ht.Finish()
 
-	resp, err := f.tracer.RoundTrip(r)
+	resp, err := f.roundTripper.RoundTrip(r)
 	if err != nil {
 		server.WriteError(w, err)
 		return

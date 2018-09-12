@@ -19,8 +19,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"net/http"
@@ -33,11 +33,18 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/util/stats"
+	"github.com/weaveworks/common/httpgrpc"
 	"github.com/weaveworks/cortex/pkg/util"
 )
 
+var (
+	errEndBeforeStart = httpgrpc.Errorf(http.StatusBadRequest, "end timestamp must not be before start time")
+	errNegativeStep   = httpgrpc.Errorf(http.StatusBadRequest, "zero or negative query resolution step widths are not accepted. Try a positive integer")
+	errStepTooSmall   = httpgrpc.Errorf(http.StatusBadRequest, "exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")
+)
+
 type queryRangeMiddleware interface {
-	Do(context.Context, queryRangeRequest) (*queryRangeResponse, error)
+	Do(context.Context, queryRangeRequest) (*apiResponse, error)
 }
 
 type queryRangeRoundTripper struct {
@@ -67,25 +74,24 @@ type queryRangeTerminator struct {
 	downstream http.RoundTripper
 }
 
-func (q queryRangeTerminator) Do(ctx context.Context, r queryRangeRequest) (*queryRangeResponse, error) {
+func (q queryRangeTerminator) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, error) {
 	request, err := r.toHTTPRequest()
 	if err != nil {
 		return nil, err
 	}
+	request = request.WithContext(ctx)
 
 	response, err := q.downstream.RoundTrip(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
-	var resp queryRangeResponse
-	if err := json.NewDecoder(response.Body).Decode(&resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+	return parseQueryRangeResponse(response)
 }
 
 type queryRangeRequest struct {
+	path       string
 	start, end int64 // Milliseconds since epoch.
 	step       int64 // Milliseconds.
 	timeout    time.Duration
@@ -107,8 +113,7 @@ func parseQueryRangeRequest(r *http.Request) (queryRangeRequest, error) {
 	}
 
 	if result.end < result.start {
-		err := errors.New("end timestamp must not be before start time")
-		return result, err
+		return result, errEndBeforeStart
 	}
 
 	result.step, err = parseDurationMs(r.FormValue("step"))
@@ -117,18 +122,17 @@ func parseQueryRangeRequest(r *http.Request) (queryRangeRequest, error) {
 	}
 
 	if result.step <= 0 {
-		err := errors.New("zero or negative query resolution step widths are not accepted. Try a positive integer")
-		return result, err
+		return result, errNegativeStep
 	}
 
 	// For safety, limit the number of returned points per timeseries.
 	// This is sufficient for 60s resolution for a week or 1h resolution for a year.
 	if (result.end-result.start)/result.step > 11000 {
-		err := errors.New("exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")
-		return result, err
+		return result, errStepTooSmall
 	}
 
 	result.query = r.FormValue("query")
+	result.path = r.URL.Path
 	return result, nil
 }
 
@@ -140,10 +144,16 @@ func (q queryRangeRequest) toHTTPRequest() (*http.Request, error) {
 		"query": []string{q.query},
 	}
 	u := url.URL{
-		Path:     "/query_range",
+		Path:     q.path,
 		RawQuery: params.Encode(),
 	}
-	return http.NewRequest("GET", u.String(), nil)
+	return http.NewRequest("GET", u.String(), devNull{})
+}
+
+type devNull struct{}
+
+func (devNull) Read(p []byte) (n int, err error) {
+	return 0, io.EOF
 }
 
 func parseTime(s string) (int64, error) {
@@ -155,35 +165,21 @@ func parseTime(s string) (int64, error) {
 	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		return t.UnixNano() / int64(time.Millisecond/time.Nanosecond), nil
 	}
-	return 0, fmt.Errorf("cannot parse %q to a valid timestamp", s)
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	if d, err := strconv.ParseFloat(s, 64); err == nil {
-		ts := d * float64(time.Second)
-		if ts > float64(math.MaxInt64) || ts < float64(math.MinInt64) {
-			return 0, fmt.Errorf("cannot parse %q to a valid duration. It overflows int64", s)
-		}
-		return time.Duration(ts), nil
-	}
-	if d, err := model.ParseDuration(s); err == nil {
-		return time.Duration(d), nil
-	}
-	return 0, fmt.Errorf("cannot parse %q to a valid duration", s)
+	return 0, httpgrpc.Errorf(http.StatusBadRequest, "cannot parse %q to a valid timestamp", s)
 }
 
 func parseDurationMs(s string) (int64, error) {
 	if d, err := strconv.ParseFloat(s, 64); err == nil {
 		ts := d * float64(time.Second/time.Millisecond)
 		if ts > float64(math.MaxInt64) || ts < float64(math.MinInt64) {
-			return 0, fmt.Errorf("cannot parse %q to a valid duration. It overflows int64", s)
+			return 0, httpgrpc.Errorf(http.StatusBadRequest, "cannot parse %q to a valid duration. It overflows int64", s)
 		}
 		return int64(ts), nil
 	}
 	if d, err := model.ParseDuration(s); err == nil {
 		return int64(d) / int64(time.Millisecond/time.Nanosecond), nil
 	}
-	return 0, fmt.Errorf("cannot parse %q to a valid duration", s)
+	return 0, httpgrpc.Errorf(http.StatusBadRequest, "cannot parse %q to a valid duration", s)
 }
 
 func encodeTime(t int64) string {
@@ -195,51 +191,29 @@ func encodeDurationMs(d int64) string {
 	return strconv.FormatFloat(float64(d)/float64(time.Second/time.Millisecond), 'f', -1, 64)
 }
 
-// queryRangeResponse contains result data for a query_range.
-type queryRangeResponse struct {
-	Type   model.ValueType   `json:"resultType"`
-	Stats  *stats.QueryStats `json:"stats,omitempty"`
-	Result model.Value       `json:"result"`
+type apiResponse struct {
+	Status    string             `json:"status"`
+	Data      queryRangeResponse `json:"data,omitempty"`
+	ErrorType string             `json:"errorType,omitempty"`
+	Error     string             `json:"error,omitempty"`
 }
 
-func (q *queryRangeResponse) UnmarshalJSON(b []byte) error {
-	v := struct {
-		Type   model.ValueType   `json:"resultType"`
-		Stats  *stats.QueryStats `json:"stats,omitempty"`
-		Result json.RawMessage   `json:"result"`
-	}{}
-
-	err := json.Unmarshal(b, &v)
-	if err != nil {
-		return err
+func parseQueryRangeResponse(r *http.Response) (*apiResponse, error) {
+	if r.StatusCode/100 != 2 {
+		body, _ := ioutil.ReadAll(r.Body)
+		return nil, httpgrpc.Errorf(r.StatusCode, string(body))
 	}
 
-	q.Type = v.Type
-	q.Stats = v.Stats
-
-	switch v.Type {
-	case model.ValVector:
-		var vv model.Vector
-		err = json.Unmarshal(v.Result, &vv)
-		q.Result = vv
-
-	case model.ValMatrix:
-		var mv model.Matrix
-		err = json.Unmarshal(v.Result, &mv)
-		q.Result = mv
-
-	default:
-		err = fmt.Errorf("unexpected value type %q", v.Type)
+	var resp apiResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		return nil, httpgrpc.Errorf(http.StatusInternalServerError, "error decoding response: %v", err)
 	}
-	return err
+	return &resp, nil
 }
 
-func (q queryRangeResponse) toHTTPResponse() (*http.Response, error) {
+func (a *apiResponse) toHTTPResponse() (*http.Response, error) {
 	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	b, err := json.Marshal(&apiResponse{
-		Status: "success",
-		Data:   q,
-	})
+	b, err := json.Marshal(a)
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error marshalling json response", "err", err)
 		return nil, err
@@ -253,9 +227,41 @@ func (q queryRangeResponse) toHTTPResponse() (*http.Response, error) {
 	return &resp, nil
 }
 
-type apiResponse struct {
-	Status    string             `json:"status"`
-	Data      queryRangeResponse `json:"data,omitempty"`
-	ErrorType string             `json:"errorType,omitempty"`
-	Error     string             `json:"error,omitempty"`
+// queryRangeResponse contains result data for a query_range.
+type queryRangeResponse struct {
+	ResultType model.ValueType   `json:"resultType"`
+	Result     model.Value       `json:"result"`
+	Stats      *stats.QueryStats `json:"stats,omitempty"`
+}
+
+func (q *queryRangeResponse) UnmarshalJSON(b []byte) error {
+	v := struct {
+		ResultType model.ValueType   `json:"resultType"`
+		Stats      *stats.QueryStats `json:"stats,omitempty"`
+		Result     json.RawMessage   `json:"result"`
+	}{}
+
+	err := json.Unmarshal(b, &v)
+	if err != nil {
+		return err
+	}
+
+	q.ResultType = v.ResultType
+	q.Stats = v.Stats
+
+	switch v.ResultType {
+	case model.ValVector:
+		var vv model.Vector
+		err = json.Unmarshal(v.Result, &vv)
+		q.Result = vv
+
+	case model.ValMatrix:
+		var mv model.Matrix
+		err = json.Unmarshal(v.Result, &mv)
+		q.Result = mv
+
+	default:
+		err = fmt.Errorf("unexpected value type %q", v.ResultType)
+	}
+	return err
 }

@@ -6,7 +6,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/common/model"
+	"github.com/weaveworks/cortex/pkg/util"
 )
 
 const millisecondPerDay = int64(24 * time.Hour / time.Millisecond)
@@ -17,11 +19,11 @@ type splitByDay struct {
 
 type response struct {
 	req  queryRangeRequest
-	resp *queryRangeResponse
+	resp *apiResponse
 	err  error
 }
 
-func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*queryRangeResponse, error) {
+func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, error) {
 	// First we're going to build new requests, one for each day, taking care
 	// to line up the boundaries with step.
 	reqs := splitQuery(r)
@@ -33,7 +35,9 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*queryRangeRes
 	resps := make(chan response)
 	for _, req := range reqs {
 		go func(req queryRangeRequest) {
+			level.Debug(util.Logger).Log("msg", "Doing request", "request", fmt.Sprintf("%+v", req))
 			resp, err := s.downstream.Do(ctx, req)
+			level.Debug(util.Logger).Log("msg", "Got response", "response", fmt.Sprintf("%+v", resp), "err", err)
 			resps <- response{
 				req:  req,
 				resp: resp,
@@ -49,7 +53,7 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*queryRangeRes
 		select {
 		case resp := <-resps:
 			if resp.err != nil {
-				if firstErr != nil {
+				if firstErr == nil {
 					firstErr = resp.err
 					cancel()
 				}
@@ -59,7 +63,7 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*queryRangeRes
 			responses = append(responses, resp)
 		}
 	}
-
+	level.Debug(util.Logger).Log("msg", "Got responses", "responses", fmt.Sprintf("%+v", responses), "err", firstErr)
 	if firstErr != nil {
 		return nil, firstErr
 	}
@@ -67,7 +71,11 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*queryRangeRes
 	// Merge the responses.
 	sort.Sort(byFirstTime(responses))
 
-	switch responses[0].resp.Result.(type) {
+	if len(responses) == 0 {
+		return &apiResponse{}, nil
+	}
+
+	switch responses[0].resp.Data.Result.(type) {
 	case model.Vector:
 		return vectorMerge(responses)
 	case model.Matrix:
@@ -86,6 +94,7 @@ func splitQuery(r queryRangeRequest) []queryRangeRequest {
 		}
 
 		reqs = append(reqs, queryRangeRequest{
+			path:  r.path,
 			start: start,
 			end:   end,
 			step:  r.step,
@@ -108,21 +117,23 @@ func (a byFirstTime) Len() int           { return len(a) }
 func (a byFirstTime) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a byFirstTime) Less(i, j int) bool { return a[i].req.start < a[j].req.start }
 
-func vectorMerge(resps []response) (*queryRangeResponse, error) {
+func vectorMerge(resps []response) (*apiResponse, error) {
 	var output model.Vector
 	for _, resp := range resps {
-		output = append(output, resp.resp.Result.(model.Vector)...)
+		output = append(output, resp.resp.Data.Result.(model.Vector)...)
 	}
-	return &queryRangeResponse{
-		Type:   model.ValVector,
-		Result: output,
+	return &apiResponse{
+		Data: queryRangeResponse{
+			ResultType: model.ValVector,
+			Result:     output,
+		},
 	}, nil
 }
 
-func matrixMerge(resps []response) (*queryRangeResponse, error) {
+func matrixMerge(resps []response) (*apiResponse, error) {
 	output := map[string]*model.SampleStream{}
 	for _, resp := range resps {
-		matrix := resp.resp.Result.(model.Matrix)
+		matrix := resp.resp.Data.Result.(model.Matrix)
 		for _, stream := range matrix {
 			metric := stream.Metric.String()
 			existing, ok := output[metric]
@@ -138,8 +149,10 @@ func matrixMerge(resps []response) (*queryRangeResponse, error) {
 	for _, stream := range output {
 		result = append(result, stream)
 	}
-	return &queryRangeResponse{
-		Type:   model.ValMatrix,
-		Result: result,
+	return &apiResponse{
+		Data: queryRangeResponse{
+			ResultType: model.ValMatrix,
+			Result:     result,
+		},
 	}, nil
 }
