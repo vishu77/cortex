@@ -29,38 +29,35 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, 
 	reqs := splitQuery(r)
 
 	// Next, do the requests in parallel.
-	// If one of the requests fail, we want to be a  ble to cancel the rest of them.
+	// If one of the requests fail, we want to be able to cancel the rest of them.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	resps := make(chan response)
+
+	resps := make(chan *apiResponse)
+	errs := make(chan error)
 	for _, req := range reqs {
 		go func(req queryRangeRequest) {
 			level.Debug(util.Logger).Log("msg", "Doing request", "request", fmt.Sprintf("%+v", req))
 			resp, err := s.downstream.Do(ctx, req)
 			level.Debug(util.Logger).Log("msg", "Got response", "response", fmt.Sprintf("%+v", resp), "err", err)
-			resps <- response{
-				req:  req,
-				resp: resp,
-				err:  err,
-			}
+			resps <- resp
+			errs <- err
 		}(req)
 	}
 
 	// Gather up the responses and errors.
-	var responses []response
+	var responses []*apiResponse
 	var firstErr error
 	for range reqs {
 		select {
 		case resp := <-resps:
-			if resp.err != nil {
-				if firstErr == nil {
-					firstErr = resp.err
-					cancel()
-				}
-				continue
-			}
-
 			responses = append(responses, resp)
+		case err := <-errs:
+			// Only record the first error, as subsequent errors are cancellations.
+			if firstErr == nil {
+				firstErr = err
+				cancel()
+			}
 		}
 	}
 	level.Debug(util.Logger).Log("msg", "Got responses", "responses", fmt.Sprintf("%+v", responses), "err", firstErr)
@@ -68,21 +65,7 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, 
 		return nil, firstErr
 	}
 
-	// Merge the responses.
-	sort.Sort(byFirstTime(responses))
-
-	if len(responses) == 0 {
-		return &apiResponse{}, nil
-	}
-
-	switch responses[0].resp.Data.Result.(type) {
-	case model.Vector:
-		return vectorMerge(responses)
-	case model.Matrix:
-		return matrixMerge(responses)
-	default:
-		return nil, fmt.Errorf("unexpected response type")
-	}
+	return mergeAPIResponses(responses)
 }
 
 func splitQuery(r queryRangeRequest) []queryRangeRequest {
@@ -111,18 +94,61 @@ func nextDayBoundary(t, step int64) int64 {
 	return t - offsetToDayBoundary
 }
 
-type byFirstTime []response
+func mergeAPIResponses(responses []*apiResponse) (*apiResponse, error) {
+	// Merge the responses.
+	sort.Sort(byFirstTime(responses))
+
+	if len(responses) == 0 {
+		return &apiResponse{
+			Status: statusSuccess,
+		}, nil
+	}
+
+	switch responses[0].Data.Result.(type) {
+	case model.Vector:
+		return vectorMerge(responses)
+	case model.Matrix:
+		return matrixMerge(responses)
+	default:
+		return nil, fmt.Errorf("unexpected response type")
+	}
+}
+
+type byFirstTime []*apiResponse
 
 func (a byFirstTime) Len() int           { return len(a) }
 func (a byFirstTime) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byFirstTime) Less(i, j int) bool { return a[i].req.start < a[j].req.start }
+func (a byFirstTime) Less(i, j int) bool { return minTime(a[i]) < minTime(a[j]) }
 
-func vectorMerge(resps []response) (*apiResponse, error) {
+func minTime(resp *apiResponse) model.Time {
+	switch result := resp.Data.Result.(type) {
+	case model.Vector:
+		if len(result) == 0 {
+			return -1
+		}
+		return result[0].Timestamp
+
+	case model.Matrix:
+		if len(result) == 0 {
+			return -1
+		}
+		if len(result[0].Values) == 0 {
+			return -1
+		}
+		return result[0].Values[0].Timestamp
+
+	default:
+		return -1
+	}
+}
+
+func vectorMerge(resps []*apiResponse) (*apiResponse, error) {
 	var output model.Vector
 	for _, resp := range resps {
-		output = append(output, resp.resp.Data.Result.(model.Vector)...)
+		output = append(output, resp.Data.Result.(model.Vector)...)
 	}
 	return &apiResponse{
+		Status: statusSuccess,
 		Data: queryRangeResponse{
 			ResultType: model.ValVector,
 			Result:     output,
@@ -130,10 +156,10 @@ func vectorMerge(resps []response) (*apiResponse, error) {
 	}, nil
 }
 
-func matrixMerge(resps []response) (*apiResponse, error) {
+func matrixMerge(resps []*apiResponse) (*apiResponse, error) {
 	output := map[string]*model.SampleStream{}
 	for _, resp := range resps {
-		matrix := resp.resp.Data.Result.(model.Matrix)
+		matrix := resp.Data.Result.(model.Matrix)
 		for _, stream := range matrix {
 			metric := stream.Metric.String()
 			existing, ok := output[metric]
@@ -150,6 +176,7 @@ func matrixMerge(resps []response) (*apiResponse, error) {
 		result = append(result, stream)
 	}
 	return &apiResponse{
+		Status: statusSuccess,
 		Data: queryRangeResponse{
 			ResultType: model.ValMatrix,
 			Result:     result,

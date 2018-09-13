@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"math"
 	"net/http"
@@ -33,7 +32,9 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/util/stats"
+
 	"github.com/weaveworks/common/httpgrpc"
+	"github.com/weaveworks/common/user"
 	"github.com/weaveworks/cortex/pkg/util"
 )
 
@@ -57,12 +58,12 @@ func (q queryRangeRoundTripper) RoundTrip(r *http.Request) (*http.Response, erro
 		return q.downstream.RoundTrip(r)
 	}
 
-	request, err := parseQueryRangeRequest(r)
+	request, ctx, err := parseQueryRangeRequest(r)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := q.queryRangeMiddleware.Do(r.Context(), request)
+	response, err := q.queryRangeMiddleware.Do(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +80,10 @@ func (q queryRangeTerminator) Do(ctx context.Context, r queryRangeRequest) (*api
 	if err != nil {
 		return nil, err
 	}
-	request = request.WithContext(ctx)
+
+	if err := user.InjectOrgIDIntoHTTPRequest(ctx, request); err != nil {
+		return nil, err
+	}
 
 	response, err := q.downstream.RoundTrip(request)
 	if err != nil {
@@ -98,42 +102,47 @@ type queryRangeRequest struct {
 	query      string
 }
 
-func parseQueryRangeRequest(r *http.Request) (queryRangeRequest, error) {
+func parseQueryRangeRequest(r *http.Request) (queryRangeRequest, context.Context, error) {
 	var result queryRangeRequest
 	var err error
 
+	_, ctx, err := user.ExtractOrgIDFromHTTPRequest(r)
+	if err != nil {
+		return result, nil, err
+	}
+
 	result.start, err = parseTime(r.FormValue("start"))
 	if err != nil {
-		return result, err
+		return result, ctx, err
 	}
 
 	result.end, err = parseTime(r.FormValue("end"))
 	if err != nil {
-		return result, err
+		return result, ctx, err
 	}
 
 	if result.end < result.start {
-		return result, errEndBeforeStart
+		return result, ctx, errEndBeforeStart
 	}
 
 	result.step, err = parseDurationMs(r.FormValue("step"))
 	if err != nil {
-		return result, err
+		return result, ctx, err
 	}
 
 	if result.step <= 0 {
-		return result, errNegativeStep
+		return result, ctx, errNegativeStep
 	}
 
 	// For safety, limit the number of returned points per timeseries.
 	// This is sufficient for 60s resolution for a week or 1h resolution for a year.
 	if (result.end-result.start)/result.step > 11000 {
-		return result, errStepTooSmall
+		return result, ctx, errStepTooSmall
 	}
 
 	result.query = r.FormValue("query")
 	result.path = r.URL.Path
-	return result, nil
+	return result, ctx, nil
 }
 
 func (q queryRangeRequest) toHTTPRequest() (*http.Request, error) {
@@ -143,17 +152,17 @@ func (q queryRangeRequest) toHTTPRequest() (*http.Request, error) {
 		"step":  []string{encodeDurationMs(q.step)},
 		"query": []string{q.query},
 	}
-	u := url.URL{
+	u := &url.URL{
 		Path:     q.path,
 		RawQuery: params.Encode(),
 	}
-	return http.NewRequest("GET", u.String(), devNull{})
-}
-
-type devNull struct{}
-
-func (devNull) Read(p []byte) (n int, err error) {
-	return 0, io.EOF
+	return &http.Request{
+		Method:     "GET",
+		RequestURI: u.String(), // This is what the httpgrpc code looks at.
+		URL:        u,
+		Body:       http.NoBody,
+		Header:     http.Header{},
+	}, nil
 }
 
 func parseTime(s string) (int64, error) {
@@ -191,6 +200,8 @@ func encodeDurationMs(d int64) string {
 	return strconv.FormatFloat(float64(d)/float64(time.Second/time.Millisecond), 'f', -1, 64)
 }
 
+const statusSuccess = "success"
+
 type apiResponse struct {
 	Status    string             `json:"status"`
 	Data      queryRangeResponse `json:"data,omitempty"`
@@ -219,11 +230,12 @@ func (a *apiResponse) toHTTPResponse() (*http.Response, error) {
 		return nil, err
 	}
 	resp := http.Response{
-		Header:     http.Header{},
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
 		Body:       ioutil.NopCloser(bytes.NewBuffer(b)),
 		StatusCode: http.StatusOK,
 	}
-	resp.Header.Set("Content-Type", "application/json")
 	return &resp, nil
 }
 

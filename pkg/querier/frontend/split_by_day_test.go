@@ -1,10 +1,18 @@
 package frontend
 
 import (
+	"context"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 
+	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+	"github.com/weaveworks/common/middleware"
+	"github.com/weaveworks/common/user"
 )
 
 const seconds = 1e3 // 1e3 milliseconds per second.
@@ -113,6 +121,134 @@ func TestSplitQuery(t *testing.T) {
 	} {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require.Equal(t, tc.expected, splitQuery(tc.input))
+		})
+	}
+}
+
+func TestMergeAPIResponses(t *testing.T) {
+	for i, tc := range []struct {
+		input    []*apiResponse
+		expected *apiResponse
+	}{
+		// No responses shouldn't panic.
+		{
+			input: []*apiResponse{},
+			expected: &apiResponse{
+				Status: statusSuccess,
+			},
+		},
+
+		// A single empty response shouldn't panic.
+		{
+			input: []*apiResponse{
+				{
+					Data: queryRangeResponse{
+						ResultType: model.ValMatrix,
+						Result:     model.Matrix{},
+					},
+				},
+			},
+			expected: &apiResponse{
+				Status: statusSuccess,
+				Data: queryRangeResponse{
+					ResultType: model.ValMatrix,
+					Result:     model.Matrix{},
+				},
+			},
+		},
+
+		// Multiple empty responses shouldn't panic.
+		{
+			input: []*apiResponse{
+				{
+					Data: queryRangeResponse{
+						ResultType: model.ValMatrix,
+						Result:     model.Matrix{},
+					},
+				},
+				{
+					Data: queryRangeResponse{
+						ResultType: model.ValMatrix,
+						Result:     model.Matrix{},
+					},
+				},
+			},
+			expected: &apiResponse{
+				Status: statusSuccess,
+				Data: queryRangeResponse{
+					ResultType: model.ValMatrix,
+					Result:     model.Matrix{},
+				},
+			},
+		},
+	} {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			output, err := mergeAPIResponses(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, output)
+		})
+	}
+}
+
+func TestSplitByDay(t *testing.T) {
+	s := httptest.NewServer(
+		middleware.AuthenticateUser.Wrap(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(responseBody))
+			}),
+		),
+	)
+	defer s.Close()
+
+	u, err := url.Parse(s.URL)
+	require.NoError(t, err)
+
+	roundtripper := queryRangeRoundTripper{
+		queryRangeMiddleware: splitByDay{
+			downstream: queryRangeTerminator{
+				downstream: singleHostRoundTripper{
+					host:       u.Host,
+					downstream: http.DefaultTransport,
+				},
+			},
+		},
+	}
+
+	mergedResponse, err := mergeAPIResponses([]*apiResponse{
+		parsedResponse,
+		parsedResponse,
+	})
+	require.NoError(t, err)
+
+	mergedHTTPResponse, err := mergedResponse.toHTTPResponse()
+	require.NoError(t, err)
+
+	mergedHTTPResponseBody, err := ioutil.ReadAll(mergedHTTPResponse.Body)
+	require.NoError(t, err)
+
+	for i, tc := range []struct {
+		path, expectedBody string
+	}{
+		{query, string(mergedHTTPResponseBody)},
+	} {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			req, err := http.NewRequest("GET", tc.path, http.NoBody)
+			require.NoError(t, err)
+
+			// query-frontend doesn't actually authenticate requests, we rely on
+			// the queriers to do this.  Hence we ensure the request doesn't have a
+			// org ID in the ctx, but does have the header.
+			ctx := user.InjectOrgID(context.Background(), "1")
+			err = user.InjectOrgIDIntoHTTPRequest(ctx, req)
+			require.NoError(t, err)
+
+			resp, err := roundtripper.RoundTrip(req)
+			require.NoError(t, err)
+			require.Equal(t, 200, resp.StatusCode)
+
+			bs, err := ioutil.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedBody, string(bs))
 		})
 	}
 }
