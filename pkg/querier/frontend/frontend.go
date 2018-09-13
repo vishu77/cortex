@@ -86,20 +86,23 @@ func New(cfg Config, log log.Logger) (*Frontend, error) {
 		log:    log,
 		queues: map[string]chan *request{},
 	}
-	var roundTripper http.RoundTripper = f
+
+	var roundTripper http.RoundTripper = &nethttp.Transport{
+		RoundTripper: f,
+	}
+
 	if cfg.SplitQueriesByDay {
 		roundTripper = &queryRangeRoundTripper{
-			downstream: f,
+			downstream: roundTripper,
 			queryRangeMiddleware: &splitByDay{
 				downstream: &queryRangeTerminator{
-					downstream: f,
+					downstream: roundTripper,
 				},
 			},
 		}
 	}
-	f.roundTripper = &nethttp.Transport{
-		RoundTripper: roundTripper,
-	}
+
+	f.roundTripper = roundTripper
 	f.cond = sync.NewCond(&f.mtx)
 	return f, nil
 }
