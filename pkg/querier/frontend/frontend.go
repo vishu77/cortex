@@ -87,9 +87,17 @@ func New(cfg Config, log log.Logger) (*Frontend, error) {
 		queues: map[string]chan *request{},
 	}
 
-	var roundTripper http.RoundTripper = &nethttp.Transport{
+	// We need to do the opentracing at the leafs of the roundtrippers, as a
+	// single request could turn into multiple requests.
+	tracingRoundTripper := &nethttp.Transport{
 		RoundTripper: f,
 	}
+	var roundTripper http.RoundTripper = RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		req, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), req)
+		defer ht.Finish()
+
+		return tracingRoundTripper.RoundTrip(req)
+	})
 
 	if cfg.SplitQueriesByDay {
 		roundTripper = &queryRangeRoundTripper{
@@ -118,9 +126,6 @@ func (f *Frontend) Close() {
 
 // ServeHTTP serves HTTP requests.
 func (f *Frontend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	r, ht := nethttp.TraceRequest(opentracing.GlobalTracer(), r)
-	defer ht.Finish()
-
 	resp, err := f.roundTripper.RoundTrip(r)
 	if err != nil {
 		server.WriteError(w, err)
