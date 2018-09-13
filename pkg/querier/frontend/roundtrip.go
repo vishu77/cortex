@@ -44,8 +44,10 @@ var (
 	errStepTooSmall   = httpgrpc.Errorf(http.StatusBadRequest, "exceeded maximum resolution of 11,000 points per timeseries. Try decreasing the query resolution (?step=XX)")
 )
 
+// RoundTripperFunc is like http.HandlerFunc, but for http.RoundTripper.
 type RoundTripperFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip implements http.RoundTripper.
 func (fn RoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
