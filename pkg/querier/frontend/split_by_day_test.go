@@ -33,17 +33,17 @@ func TestNextDayBoundary(t *testing.T) {
 
 func TestSplitQuery(t *testing.T) {
 	for i, tc := range []struct {
-		input    queryRangeRequest
-		expected []queryRangeRequest
+		input    *queryRangeRequest
+		expected []*queryRangeRequest
 	}{
 		{
-			input: queryRangeRequest{
+			input: &queryRangeRequest{
 				start: 0,
 				end:   60 * 60 * seconds,
 				step:  15 * seconds,
 				query: "foo",
 			},
-			expected: []queryRangeRequest{
+			expected: []*queryRangeRequest{
 				{
 					start: 0,
 					end:   60 * 60 * seconds,
@@ -53,13 +53,13 @@ func TestSplitQuery(t *testing.T) {
 			},
 		},
 		{
-			input: queryRangeRequest{
+			input: &queryRangeRequest{
 				start: 0,
 				end:   24 * 3600 * seconds,
 				step:  15 * seconds,
 				query: "foo",
 			},
-			expected: []queryRangeRequest{
+			expected: []*queryRangeRequest{
 				{
 					start: 0,
 					end:   24 * 3600 * seconds,
@@ -69,13 +69,13 @@ func TestSplitQuery(t *testing.T) {
 			},
 		},
 		{
-			input: queryRangeRequest{
+			input: &queryRangeRequest{
 				start: 0,
 				end:   2 * 24 * 3600 * seconds,
 				step:  15 * seconds,
 				query: "foo",
 			},
-			expected: []queryRangeRequest{
+			expected: []*queryRangeRequest{
 				{
 					start: 0,
 					end:   (24 * 3600 * seconds) - (15 * seconds),
@@ -91,13 +91,13 @@ func TestSplitQuery(t *testing.T) {
 			},
 		},
 		{
-			input: queryRangeRequest{
+			input: &queryRangeRequest{
 				start: 3 * 3600 * seconds,
 				end:   3 * 24 * 3600 * seconds,
 				step:  15 * seconds,
 				query: "foo",
 			},
-			expected: []queryRangeRequest{
+			expected: []*queryRangeRequest{
 				{
 					start: 3 * 3600 * seconds,
 					end:   (24 * 3600 * seconds) - (15 * seconds),
@@ -181,6 +181,57 @@ func TestMergeAPIResponses(t *testing.T) {
 				},
 			},
 		},
+
+		// Multiple empty responses shouldn't panic.
+		{
+			input: []*apiResponse{
+				{
+					Data: queryRangeResponse{
+						ResultType: model.ValMatrix,
+						Result: model.Matrix{
+							{
+								Metric: model.Metric{},
+								Values: []model.SamplePair{
+									{0, 0},
+									{1, 1},
+								},
+							},
+						},
+					},
+				},
+				{
+					Data: queryRangeResponse{
+						ResultType: model.ValMatrix,
+						Result: model.Matrix{
+							{
+								Metric: model.Metric{},
+								Values: []model.SamplePair{
+									{2, 2},
+									{3, 3},
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: &apiResponse{
+				Status: statusSuccess,
+				Data: queryRangeResponse{
+					ResultType: model.ValMatrix,
+					Result: model.Matrix{
+						{
+							Metric: model.Metric{},
+							Values: []model.SamplePair{
+								{0, 0},
+								{1, 1},
+								{2, 2},
+								{3, 3},
+							},
+						},
+					},
+				},
+			},
+		},
 	} {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			output, err := mergeAPIResponses(tc.input)
@@ -235,12 +286,8 @@ func TestSplitByDay(t *testing.T) {
 			req, err := http.NewRequest("GET", tc.path, http.NoBody)
 			require.NoError(t, err)
 
-			// query-frontend doesn't actually authenticate requests, we rely on
-			// the queriers to do this.  Hence we ensure the request doesn't have a
-			// org ID in the ctx, but does have the header.
 			ctx := user.InjectOrgID(context.Background(), "1")
-			err = user.InjectOrgIDIntoHTTPRequest(ctx, req)
-			require.NoError(t, err)
+			req = req.WithContext(ctx)
 
 			resp, err := roundtripper.RoundTrip(req)
 			require.NoError(t, err)

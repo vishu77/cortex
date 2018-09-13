@@ -42,12 +42,12 @@ var parsedResponse = &apiResponse{
 func TestQueryRangeRequest(t *testing.T) {
 	for i, tc := range []struct {
 		url         string
-		expected    queryRangeRequest
+		expected    *queryRangeRequest
 		expectedErr error
 	}{
 		{
 			url: query,
-			expected: queryRangeRequest{
+			expected: &queryRangeRequest{
 				path:  "/api/v1/query_range",
 				start: 1536673680 * 1e3,
 				end:   1536760200 * 1e3,
@@ -85,17 +85,16 @@ func TestQueryRangeRequest(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx := user.InjectOrgID(context.Background(), "1")
-			err = user.InjectOrgIDIntoHTTPRequest(ctx, r)
-			require.NoError(t, err)
+			r = r.WithContext(ctx)
 
-			req, _, err := parseQueryRangeRequest(r)
+			req, err := parseQueryRangeRequest(r)
 			if err != nil {
 				require.EqualValues(t, tc.expectedErr, err)
 				return
 			}
 			require.EqualValues(t, tc.expected, req)
 
-			rdash, err := req.toHTTPRequest()
+			rdash, err := req.toHTTPRequest(context.Background())
 			require.NoError(t, err)
 			require.EqualValues(t, tc.url, rdash.RequestURI)
 		})
@@ -177,6 +176,7 @@ func TestRoundTrip(t *testing.T) {
 			// the queriers to do this.  Hence we ensure the request doesn't have a
 			// org ID in the ctx, but does have the header.
 			ctx := user.InjectOrgID(context.Background(), "1")
+			req = req.WithContext(ctx)
 			err = user.InjectOrgIDIntoHTTPRequest(ctx, req)
 			require.NoError(t, err)
 

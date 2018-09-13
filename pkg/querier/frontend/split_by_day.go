@@ -6,9 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/common/model"
-	"github.com/weaveworks/cortex/pkg/util"
 )
 
 const millisecondPerDay = int64(24 * time.Hour / time.Millisecond)
@@ -23,7 +21,7 @@ type response struct {
 	err  error
 }
 
-func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, error) {
+func (s splitByDay) Do(ctx context.Context, r *queryRangeRequest) (*apiResponse, error) {
 	// First we're going to build new requests, one for each day, taking care
 	// to line up the boundaries with step.
 	reqs := splitQuery(r)
@@ -36,12 +34,13 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, 
 	resps := make(chan *apiResponse)
 	errs := make(chan error)
 	for _, req := range reqs {
-		go func(req queryRangeRequest) {
-			level.Debug(util.Logger).Log("msg", "Doing request", "request", fmt.Sprintf("%+v", req))
+		go func(req *queryRangeRequest) {
 			resp, err := s.downstream.Do(ctx, req)
-			level.Debug(util.Logger).Log("msg", "Got response", "response", fmt.Sprintf("%+v", resp), "err", err)
-			resps <- resp
-			errs <- err
+			if err != nil {
+				errs <- err
+			} else {
+				resps <- resp
+			}
 		}(req)
 	}
 
@@ -60,7 +59,7 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, 
 			}
 		}
 	}
-	level.Debug(util.Logger).Log("msg", "Got responses", "responses", fmt.Sprintf("%+v", responses), "err", firstErr)
+
 	if firstErr != nil {
 		return nil, firstErr
 	}
@@ -68,15 +67,15 @@ func (s splitByDay) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, 
 	return mergeAPIResponses(responses)
 }
 
-func splitQuery(r queryRangeRequest) []queryRangeRequest {
-	reqs := []queryRangeRequest{}
+func splitQuery(r *queryRangeRequest) []*queryRangeRequest {
+	reqs := []*queryRangeRequest{}
 	for start := r.start; start < r.end; start = nextDayBoundary(start, r.step) + r.step {
 		end := nextDayBoundary(start, r.step)
 		if end+r.step >= r.end {
 			end = r.end
 		}
 
-		reqs = append(reqs, queryRangeRequest{
+		reqs = append(reqs, &queryRangeRequest{
 			path:  r.path,
 			start: start,
 			end:   end,
@@ -164,17 +163,26 @@ func matrixMerge(resps []*apiResponse) (*apiResponse, error) {
 			metric := stream.Metric.String()
 			existing, ok := output[metric]
 			if !ok {
-				output[metric] = stream
-				continue
+				existing = &model.SampleStream{
+					Metric: stream.Metric,
+				}
 			}
 			existing.Values = append(existing.Values, stream.Values...)
+			output[metric] = existing
 		}
 	}
 
-	result := make(model.Matrix, len(output))
-	for _, stream := range output {
-		result = append(result, stream)
+	keys := make([]string, 0, len(output))
+	for key := range output {
+		keys = append(keys, key)
 	}
+	sort.Strings(keys)
+
+	result := make(model.Matrix, 0, len(output))
+	for _, key := range keys {
+		result = append(result, output[key])
+	}
+
 	return &apiResponse{
 		Status: statusSuccess,
 		Data: queryRangeResponse{

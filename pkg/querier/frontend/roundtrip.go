@@ -45,7 +45,7 @@ var (
 )
 
 type queryRangeMiddleware interface {
-	Do(context.Context, queryRangeRequest) (*apiResponse, error)
+	Do(context.Context, *queryRangeRequest) (*apiResponse, error)
 }
 
 type queryRangeRoundTripper struct {
@@ -58,12 +58,12 @@ func (q queryRangeRoundTripper) RoundTrip(r *http.Request) (*http.Response, erro
 		return q.downstream.RoundTrip(r)
 	}
 
-	request, ctx, err := parseQueryRangeRequest(r)
+	request, err := parseQueryRangeRequest(r)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := q.queryRangeMiddleware.Do(ctx, request)
+	response, err := q.queryRangeMiddleware.Do(r.Context(), request)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ type queryRangeTerminator struct {
 	downstream http.RoundTripper
 }
 
-func (q queryRangeTerminator) Do(ctx context.Context, r queryRangeRequest) (*apiResponse, error) {
-	request, err := r.toHTTPRequest()
+func (q queryRangeTerminator) Do(ctx context.Context, r *queryRangeRequest) (*apiResponse, error) {
+	request, err := r.toHTTPRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -102,50 +102,44 @@ type queryRangeRequest struct {
 	query      string
 }
 
-func parseQueryRangeRequest(r *http.Request) (queryRangeRequest, context.Context, error) {
+func parseQueryRangeRequest(r *http.Request) (*queryRangeRequest, error) {
 	var result queryRangeRequest
 	var err error
-
-	_, ctx, err := user.ExtractOrgIDFromHTTPRequest(r)
-	if err != nil {
-		return result, nil, err
-	}
-
 	result.start, err = parseTime(r.FormValue("start"))
 	if err != nil {
-		return result, ctx, err
+		return nil, err
 	}
 
 	result.end, err = parseTime(r.FormValue("end"))
 	if err != nil {
-		return result, ctx, err
+		return nil, err
 	}
 
 	if result.end < result.start {
-		return result, ctx, errEndBeforeStart
+		return nil, errEndBeforeStart
 	}
 
 	result.step, err = parseDurationMs(r.FormValue("step"))
 	if err != nil {
-		return result, ctx, err
+		return nil, err
 	}
 
 	if result.step <= 0 {
-		return result, ctx, errNegativeStep
+		return nil, errNegativeStep
 	}
 
 	// For safety, limit the number of returned points per timeseries.
 	// This is sufficient for 60s resolution for a week or 1h resolution for a year.
 	if (result.end-result.start)/result.step > 11000 {
-		return result, ctx, errStepTooSmall
+		return nil, errStepTooSmall
 	}
 
 	result.query = r.FormValue("query")
 	result.path = r.URL.Path
-	return result, ctx, nil
+	return &result, nil
 }
 
-func (q queryRangeRequest) toHTTPRequest() (*http.Request, error) {
+func (q queryRangeRequest) toHTTPRequest(ctx context.Context) (*http.Request, error) {
 	params := url.Values{
 		"start": []string{encodeTime(q.start)},
 		"end":   []string{encodeTime(q.end)},
@@ -156,13 +150,15 @@ func (q queryRangeRequest) toHTTPRequest() (*http.Request, error) {
 		Path:     q.path,
 		RawQuery: params.Encode(),
 	}
-	return &http.Request{
+	req := &http.Request{
 		Method:     "GET",
 		RequestURI: u.String(), // This is what the httpgrpc code looks at.
 		URL:        u,
 		Body:       http.NoBody,
 		Header:     http.Header{},
-	}, nil
+	}
+
+	return req.WithContext(ctx), nil
 }
 
 func parseTime(s string) (int64, error) {
