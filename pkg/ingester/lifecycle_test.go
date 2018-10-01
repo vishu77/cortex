@@ -3,8 +3,6 @@ package ingester
 import (
 	"io"
 	"math"
-	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -23,6 +21,7 @@ import (
 	"github.com/weaveworks/cortex/pkg/ingester/client"
 	"github.com/weaveworks/cortex/pkg/ring"
 	"github.com/weaveworks/cortex/pkg/util"
+	"github.com/weaveworks/cortex/pkg/util/test"
 )
 
 const userID = "1"
@@ -54,7 +53,7 @@ func TestIngesterRestart(t *testing.T) {
 		ingester.Shutdown() // doesn't actually unregister due to skipUnregister: true
 	}
 
-	poll(t, 100*time.Millisecond, 1, func() interface{} {
+	test.Poll(t, 100*time.Millisecond, 1, func() interface{} {
 		return numTokens(config.LifecyclerConfig.KVClient, "localhost")
 	})
 
@@ -67,7 +66,7 @@ func TestIngesterRestart(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	poll(t, 100*time.Millisecond, 1, func() interface{} {
+	test.Poll(t, 100*time.Millisecond, 1, func() interface{} {
 		return numTokens(config.LifecyclerConfig.KVClient, "localhost")
 	})
 }
@@ -83,7 +82,7 @@ func TestIngesterTransfer(t *testing.T) {
 	ing1, err := New(cfg1, nil)
 	require.NoError(t, err)
 
-	poll(t, 100*time.Millisecond, ring.ACTIVE, func() interface{} {
+	test.Poll(t, 100*time.Millisecond, ring.ACTIVE, func() interface{} {
 		return ing1.lifecycler.GetState()
 	})
 
@@ -123,7 +122,7 @@ func TestIngesterTransfer(t *testing.T) {
 
 	// Now stop the first ingester, and wait for the second ingester to become ACTIVE.
 	ing1.Shutdown()
-	poll(t, 10*time.Second, ring.ACTIVE, func() interface{} {
+	test.Poll(t, 10*time.Second, ring.ACTIVE, func() interface{} {
 		return ing2.lifecycler.GetState()
 	})
 
@@ -162,7 +161,7 @@ func TestIngesterBadTransfer(t *testing.T) {
 	ing, err := New(cfg, nil)
 	require.NoError(t, err)
 
-	poll(t, 100*time.Millisecond, ring.PENDING, func() interface{} {
+	test.Poll(t, 100*time.Millisecond, ring.PENDING, func() interface{} {
 		return ing.lifecycler.GetState()
 	})
 
@@ -190,25 +189,6 @@ func numTokens(c ring.KVClient, name string) int {
 		}
 	}
 	return count
-}
-
-// poll repeatedly evaluates condition until we either timeout, or it succeeds.
-func poll(t *testing.T, d time.Duration, want interface{}, have func() interface{}) {
-	deadline := time.Now().Add(d)
-	for {
-		if time.Now().After(deadline) {
-			break
-		}
-		if reflect.DeepEqual(want, have()) {
-			return
-		}
-		time.Sleep(d / 10)
-	}
-	h := have()
-	if !reflect.DeepEqual(want, h) {
-		_, file, line, _ := runtime.Caller(1)
-		t.Fatalf("%s:%d: %v != %v", file, line, want, h)
-	}
 }
 
 type ingesterTransferChunkStreamMock struct {
@@ -297,7 +277,7 @@ func TestIngesterFlush(t *testing.T) {
 	// Start the ingester, and get it into ACTIVE state.
 	store, ing := newTestStore(t, defaultIngesterTestConfig())
 
-	poll(t, 100*time.Millisecond, ring.ACTIVE, func() interface{} {
+	test.Poll(t, 100*time.Millisecond, ring.ACTIVE, func() interface{} {
 		return ing.lifecycler.GetState()
 	})
 
@@ -329,7 +309,7 @@ func TestIngesterFlush(t *testing.T) {
 	// to exit.  We just want to check that by the time the token is removed from
 	// the ring, the data is in the chunk store.
 	ing.lifecycler.Shutdown()
-	poll(t, 200*time.Millisecond, 0, func() interface{} {
+	test.Poll(t, 200*time.Millisecond, 0, func() interface{} {
 		r, err := ing.lifecycler.KVStore.Get(context.Background(), ring.ConsulKey)
 		if err != nil {
 			return -1
