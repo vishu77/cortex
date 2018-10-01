@@ -722,18 +722,19 @@
   revision = "fb713f6d8239b57c646cae30f78e8b4b8861a1aa"
 
 [[projects]]
-  branch = "master"
-  digest = "1:511d8b5b4cef21fdc5c660e5d9c46a2d6d039809d9600ff1518b033e300522b9"
+  branch = "opentracing"
+  digest = "1:992577f5f869ee6a0a6e5a81f70c3ac0ab1281bcc463669b341920eb5561ac64"
   name = "github.com/prometheus/client_golang"
   packages = [
     "api",
     "api/prometheus/v1",
     "prometheus",
+    "prometheus/internal",
     "prometheus/promauto",
     "prometheus/promhttp",
   ]
   pruneopts = "UT"
-  revision = "bcbbc08eb2ddff3af83bbf11e7ec13b4fd730b6e"
+  revision = "7e63e45b043f8b35889047afd59753d27a04bc16"
 
 [[projects]]
   branch = "master"
@@ -1413,7 +1414,6 @@
     "github.com/prometheus/tsdb",
     "github.com/prometheus/tsdb/fileutil",
     "github.com/segmentio/fasthash/fnv1a",
-    "github.com/sirupsen/logrus",
     "github.com/stretchr/testify/assert",
     "github.com/stretchr/testify/require",
     "github.com/uber/jaeger-client-go",

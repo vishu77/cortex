@@ -15,7 +15,7 @@
 #   https://github.com/prometheus/client_golang/issues/375
 [[override]]
   name = "github.com/prometheus/client_golang"
-  branch = "master"
+  branch = "opentracing"
 
 [[constraint]]
   name = "github.com/prometheus/alertmanager"
