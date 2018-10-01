@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/go-kit/kit/log/level"
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 	"github.com/weaveworks/cortex/pkg/util"
 )
 
@@ -86,6 +86,7 @@ func (r *Ring) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Implement PRG pattern to prevent double-POST and work with CSRF middleware.
 		// https://en.wikipedia.org/wiki/Post/Redirect/Get
 		http.Redirect(w, req, req.RequestURI, http.StatusFound)
+		return
 	}
 
 	r.mtx.RLock()

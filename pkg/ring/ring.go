@@ -176,7 +176,8 @@ func (r *Ring) migrateRing(desc *Desc) *Desc {
 			})
 		}
 	}
-	sort.Sort(ByToken(desc.Tokens))
+	sort.Sort(ByToken(tokens))
+	desc.Tokens = tokens
 	return desc
 }
 
