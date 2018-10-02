@@ -23,8 +23,10 @@ func main() {
 			},
 		}
 		frontendConfig frontend.Config
+		maxMessageSize int
 	)
 	util.RegisterFlags(&serverConfig, &frontendConfig)
+	flag.IntVar(&maxMessageSize, "query-frontend.max-recv-message-size", 1024*1024*64, "Limit on the size of a grpc message this server can receive.")
 	flag.Parse()
 
 	// Setting the environment variable JAEGER_AGENT_HOST enables tracing
@@ -33,6 +35,7 @@ func main() {
 
 	util.InitLogger(&serverConfig)
 
+	serverConfig.GRPCOptions = append(serverConfig.GRPCOptions, grpc.MaxSendMsgSize(maxMessageSize))
 	server, err := server.New(serverConfig)
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error initializing server", "err", err)
