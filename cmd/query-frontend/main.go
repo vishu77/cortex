@@ -35,7 +35,7 @@ func main() {
 
 	util.InitLogger(&serverConfig)
 
-	serverConfig.GRPCOptions = append(serverConfig.GRPCOptions, grpc.MaxSendMsgSize(maxMessageSize))
+	serverConfig.GRPCOptions = append(serverConfig.GRPCOptions, grpc.MaxRecvMsgSize(maxMessageSize))
 	server, err := server.New(serverConfig)
 	if err != nil {
 		level.Error(util.Logger).Log("msg", "error initializing server", "err", err)
