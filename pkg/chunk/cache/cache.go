@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"flag"
+	"time"
 )
 
 // Cache byte arrays by key.
@@ -15,11 +16,17 @@ type Cache interface {
 // Config for building Caches.
 type Config struct {
 	EnableDiskcache bool
+	EnableFifoCache bool
+
+	DefaultValidity time.Duration
 
 	background     BackgroundConfig
 	memcache       MemcachedConfig
 	memcacheClient MemcachedClientConfig
 	diskcache      DiskcacheConfig
+	fifocache      FifoCacheConfig
+
+	prefix string
 
 	// For tests to inject specific implementations.
 	Cache Cache
@@ -27,12 +34,26 @@ type Config struct {
 
 // RegisterFlags adds the flags required to config this to the given FlagSet.
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
-	f.BoolVar(&cfg.EnableDiskcache, "cache.enable-diskcache", false, "Enable on-disk cache")
+	cfg.RegisterFlagsWithPrefix("", "", f)
+}
 
-	cfg.background.RegisterFlags(f)
-	cfg.memcache.RegisterFlags(f)
-	cfg.memcacheClient.RegisterFlags(f)
-	cfg.diskcache.RegisterFlags(f)
+// RegisterFlagsWithPrefix adds the flags required to config this to the given FlagSet
+func (cfg *Config) RegisterFlagsWithPrefix(prefix string, description string, f *flag.FlagSet) {
+	cfg.background.RegisterFlagsWithPrefix(prefix, description, f)
+	cfg.memcache.RegisterFlagsWithPrefix(prefix, description, f)
+	cfg.memcacheClient.RegisterFlagsWithPrefix(prefix, description, f)
+	cfg.diskcache.RegisterFlagsWithPrefix(prefix, description, f)
+	cfg.fifocache.RegisterFlagsWithPrefix(prefix, description, f)
+
+	if prefix != "" {
+		prefix += "."
+	}
+
+	f.BoolVar(&cfg.EnableDiskcache, prefix+"cache.enable-diskcache", false, description+"Enable on-disk cache.")
+	f.BoolVar(&cfg.EnableFifoCache, prefix+"cache.enable-fifocache", false, description+"Enable in-memory cache.")
+	f.DurationVar(&cfg.DefaultValidity, prefix+"cache.default-validity", 0, description+"The default validity of entries for caches unless overridden.")
+
+	cfg.prefix = prefix
 }
 
 // New creates a new Cache using Config.
@@ -43,23 +64,45 @@ func New(cfg Config) (Cache, error) {
 
 	caches := []Cache{}
 
+	if cfg.EnableFifoCache {
+		prefix := ""
+		if cfg.prefix != "" {
+			prefix = cfg.prefix
+		}
+
+		if cfg.fifocache.Validity == 0 && cfg.DefaultValidity != 0 {
+			cfg.fifocache.Validity = cfg.DefaultValidity
+		}
+
+		cache := NewFifoCache(prefix, cfg.fifocache)
+		caches = append(caches, Instrument(cfg.prefix+"fifocache", cache))
+	}
+
 	if cfg.EnableDiskcache {
 		cache, err := NewDiskcache(cfg.diskcache)
 		if err != nil {
 			return nil, err
 		}
-		caches = append(caches, NewBackground("diskcache", cfg.background, Instrument("diskcache", cache)))
+
+		cacheName := cfg.prefix + "diskcache"
+		caches = append(caches, NewBackground(cacheName, cfg.background, Instrument(cacheName, cache)))
 	}
 
 	if cfg.memcacheClient.Host != "" {
+		if cfg.memcache.Expiration == 0 && cfg.DefaultValidity != 0 {
+			cfg.memcache.Expiration = cfg.DefaultValidity
+		}
+
 		client := NewMemcachedClient(cfg.memcacheClient)
 		cache := NewMemcached(cfg.memcache, client)
-		caches = append(caches, NewBackground("memcache", cfg.background, Instrument("memcache", cache)))
+
+		cacheName := cfg.prefix + "memcache"
+		caches = append(caches, NewBackground(cacheName, cfg.background, Instrument(cacheName, cache)))
 	}
 
 	cache := NewTiered(caches)
 	if len(caches) > 1 {
-		cache = Instrument("tiered", cache)
+		cache = Instrument(cfg.prefix+"tiered", cache)
 	}
 	return cache, nil
 }
