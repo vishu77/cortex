@@ -459,9 +459,13 @@ func (s *streamer) Size(ctx context.Context) (int, error) {
 				return 0, fmt.Errorf("stream failed, %v, current query %v_%v_%v, with user %v", err, query.tableName, query.tokenFrom, query.tokenTo, query.userID)
 			}
 		} else {
-			q := s.session.Query(fmt.Sprintf("SELECT COUNT(hash) FROM %s WHERE Token(hash) >= ? AND Token(hash) < ?", query.tableName), query.tokenFrom, query.tokenTo)
-			iter := q.WithContext(ctx).Iter()
+			q := s.session.Query(
+				fmt.Sprintf("SELECT COUNT(hash) FROM %s WHERE Token(hash) >= ? AND Token(hash) < ?", query.tableName),
+				query.tokenFrom,
+				query.tokenTo,
+			).RetryPolicy(&gocql.SimpleRetryPolicy{NumRetries: 5})
 
+			iter := q.WithContext(ctx).Iter()
 			for iter.Scan(&count) {
 				n += count
 			}
