@@ -770,8 +770,8 @@
   revision = "6ac8c5d890d415025dd5aae7595bcb2a6e7e2fad"
 
 [[projects]]
-  branch = "master"
-  digest = "1:802ca71c23e27f7fe0a6392c1f9240e398bfdcaa6c357408ad40a1fe8d3c403d"
+  branch = "promql-parallelise-select"
+  digest = "1:7dec524a1389aee6dcea61e8bca92131756e3fd4928989eebd2cfc8e0bf0ba8f"
   name = "github.com/prometheus/prometheus"
   packages = [
     "config",
@@ -814,7 +814,8 @@
     "web/api/v1",
   ]
   pruneopts = "UT"
-  revision = "71855a22a456cfd25858ab3840fcdf8d590edd09"
+  revision = "eec43dba9014008219e0aaeb5aa2a945ada9a257"
+  source = "github.com/tomwilkie/prometheus"
 
 [[projects]]
   branch = "master"
