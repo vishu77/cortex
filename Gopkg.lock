@@ -606,14 +606,6 @@
   revision = "cc309e4a22231782e8893f3c35ced0967807a33e"
 
 [[projects]]
-  branch = "master"
-  digest = "1:16886567e49201f2bb97fc738dfe8097494764135a83b533fc020fcefe37d8fe"
-  name = "github.com/nightlyone/lockfile"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "6a197d5ea61168f2ac821de2b7f011b250904900"
-
-[[projects]]
   digest = "1:d5f4c5b22e15b338051c4e26387e980b60d8e9eed13938adf1c415913ac64dbd"
   name = "github.com/oklog/oklog"
   packages = ["pkg/group"]
@@ -771,7 +763,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:802ca71c23e27f7fe0a6392c1f9240e398bfdcaa6c357408ad40a1fe8d3c403d"
+  digest = "1:d68683644dc2e1dbd57734672a167cf5f21b23a67c57bc1e3315f3c97cb706fb"
   name = "github.com/prometheus/prometheus"
   packages = [
     "config",
@@ -790,6 +782,7 @@
     "discovery/triton",
     "discovery/zookeeper",
     "notifier",
+    "pkg/gate",
     "pkg/labels",
     "pkg/pool",
     "pkg/relabel",
@@ -814,11 +807,10 @@
     "web/api/v1",
   ]
   pruneopts = "UT"
-  revision = "71855a22a456cfd25858ab3840fcdf8d590edd09"
+  revision = "e1d9bf77f1990ff246d02bb33374068d34dad3d2"
 
 [[projects]]
-  branch = "master"
-  digest = "1:8a81e6f6374afec45e2a8686f8c25e9551fa0fd50187ae0de767e54b1ae6e8cb"
+  digest = "1:b66a553f47e95141667cd5bf790694d5043f8cfbe0c68d6256ec450204897640"
   name = "github.com/prometheus/tsdb"
   packages = [
     ".",
@@ -827,9 +819,11 @@
     "fileutil",
     "index",
     "labels",
+    "wal",
   ]
   pruneopts = "UT"
-  revision = "195bc0d286b077f5633eb4bda76743620588b2fa"
+  revision = "7f30395115fcbcf932d549332fb9feb060b51945"
+  version = "v0.2.0"
 
 [[projects]]
   branch = "master"

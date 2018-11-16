@@ -38,6 +38,8 @@ const (
 
 	indexFormatV1 = 1
 	indexFormatV2 = 2
+
+	labelNameSeperator = "\xff"
 )
 
 type indexWriterSeries struct {
@@ -271,7 +273,9 @@ func (w *Writer) AddSeries(ref uint64, lset labels.Labels, chunks ...chunks.Meta
 	}
 	// We add padding to 16 bytes to increase the addressable space we get through 4 byte
 	// series references.
-	w.addPadding(16)
+	if err := w.addPadding(16); err != nil {
+		return errors.Errorf("failed to write padding bytes: %v", err)
+	}
 
 	if w.pos%16 != 0 {
 		return errors.Errorf("series write not 16-byte aligned at %d", w.pos)
@@ -392,7 +396,7 @@ func (w *Writer) WriteLabelIndex(names []string, values []string) error {
 	w.buf2.putBE32int(valt.Len())
 
 	// here we have an index for the symbol file if v2, otherwise it's an offset
-	for _, v := range valt.s {
+	for _, v := range valt.entries {
 		index, ok := w.symbols[v]
 		if !ok {
 			return errors.Errorf("symbol entry for %q does not exist", v)
@@ -740,8 +744,8 @@ func (r *Reader) decbufUvarintAt(off int) decbuf {
 	b := r.b.Range(off, off+binary.MaxVarintLen32)
 
 	l, n := binary.Uvarint(b)
-	if n > binary.MaxVarintLen32 {
-		return decbuf{e: errors.New("invalid uvarint")}
+	if n <= 0 || n > binary.MaxVarintLen32 {
+		return decbuf{e: errors.Errorf("invalid uvarint %d", n)}
 	}
 
 	if r.b.Len() < off+n+int(l)+4 {
@@ -780,7 +784,7 @@ func (r *Reader) readSymbols(off int) error {
 
 	for d.err() == nil && d.len() > 0 && cnt > 0 {
 		s := d.uvarintStr()
-		r.symbols[uint32(nextPos)] = s
+		r.symbols[nextPos] = s
 
 		if r.version == 2 {
 			nextPos++
@@ -800,7 +804,7 @@ func (r *Reader) readOffsetTable(off uint64, f func([]string, uint64) error) err
 	cnt := d.be32()
 
 	for d.err() == nil && d.len() > 0 && cnt > 0 {
-		keyCount := int(d.uvarint())
+		keyCount := d.uvarint()
 		keys := make([]string, 0, keyCount)
 
 		for i := 0; i < keyCount; i++ {
@@ -848,9 +852,8 @@ func (r *Reader) SymbolTable() map[uint32]string {
 
 // LabelValues returns value tuples that exist for the given label name tuples.
 func (r *Reader) LabelValues(names ...string) (StringTuples, error) {
-	const sep = "\xff"
 
-	key := strings.Join(names, sep)
+	key := strings.Join(names, labelNameSeperator)
 	off, ok := r.labels[key]
 	if !ok {
 		// XXX(fabxc): hot fix. Should return a partial data error and handle cases
@@ -868,9 +871,9 @@ func (r *Reader) LabelValues(names ...string) (StringTuples, error) {
 		return nil, errors.Wrap(d.err(), "read label value index")
 	}
 	st := &serializedStringTuples{
-		l:      nc,
-		b:      d.get(),
-		lookup: r.lookupSymbol,
+		idsCount: nc,
+		idsBytes: d.get(),
+		lookup:   r.lookupSymbol,
 	}
 	return st, nil
 }
@@ -880,14 +883,12 @@ type emptyStringTuples struct{}
 func (emptyStringTuples) At(i int) ([]string, error) { return nil, nil }
 func (emptyStringTuples) Len() int                   { return 0 }
 
-// LabelIndices returns a for which labels or label tuples value indices exist.
+// LabelIndices returns a slice of label names for which labels or label tuples value indices exist.
+// NOTE: This is deprecated. Use `LabelNames()` instead.
 func (r *Reader) LabelIndices() ([][]string, error) {
-	const sep = "\xff"
-
 	res := [][]string{}
-
 	for s := range r.labels {
-		res = append(res, strings.Split(s, sep))
+		res = append(res, strings.Split(s, labelNameSeperator))
 	}
 	return res, nil
 }
@@ -933,34 +934,58 @@ func (r *Reader) SortedPostings(p Postings) Postings {
 	return p
 }
 
-type stringTuples struct {
-	l int      // tuple length
-	s []string // flattened tuple entries
+// LabelNames returns all the unique label names present in the index.
+func (r *Reader) LabelNames() ([]string, error) {
+	labelNamesMap := make(map[string]struct{}, len(r.labels))
+	for key := range r.labels {
+		// 'key' contains the label names concatenated with the
+		// delimiter 'labelNameSeperator'.
+		names := strings.Split(key, labelNameSeperator)
+		for _, name := range names {
+			if name == allPostingsKey.Name {
+				// This is not from any metric.
+				// It is basically an empty label name.
+				continue
+			}
+			labelNamesMap[name] = struct{}{}
+		}
+	}
+	labelNames := make([]string, 0, len(labelNamesMap))
+	for name := range labelNamesMap {
+		labelNames = append(labelNames, name)
+	}
+	sort.Strings(labelNames)
+	return labelNames, nil
 }
 
-func NewStringTuples(s []string, l int) (*stringTuples, error) {
-	if len(s)%l != 0 {
+type stringTuples struct {
+	length  int      // tuple length
+	entries []string // flattened tuple entries
+}
+
+func NewStringTuples(entries []string, length int) (*stringTuples, error) {
+	if len(entries)%length != 0 {
 		return nil, errors.Wrap(errInvalidSize, "string tuple list")
 	}
-	return &stringTuples{s: s, l: l}, nil
+	return &stringTuples{entries: entries, length: length}, nil
 }
 
-func (t *stringTuples) Len() int                   { return len(t.s) / t.l }
-func (t *stringTuples) At(i int) ([]string, error) { return t.s[i : i+t.l], nil }
+func (t *stringTuples) Len() int                   { return len(t.entries) / t.length }
+func (t *stringTuples) At(i int) ([]string, error) { return t.entries[i : i+t.length], nil }
 
 func (t *stringTuples) Swap(i, j int) {
-	c := make([]string, t.l)
-	copy(c, t.s[i:i+t.l])
+	c := make([]string, t.length)
+	copy(c, t.entries[i:i+t.length])
 
-	for k := 0; k < t.l; k++ {
-		t.s[i+k] = t.s[j+k]
-		t.s[j+k] = c[k]
+	for k := 0; k < t.length; k++ {
+		t.entries[i+k] = t.entries[j+k]
+		t.entries[j+k] = c[k]
 	}
 }
 
 func (t *stringTuples) Less(i, j int) bool {
-	for k := 0; k < t.l; k++ {
-		d := strings.Compare(t.s[i+k], t.s[j+k])
+	for k := 0; k < t.length; k++ {
+		d := strings.Compare(t.entries[i+k], t.entries[j+k])
 
 		if d < 0 {
 			return true
@@ -973,23 +998,23 @@ func (t *stringTuples) Less(i, j int) bool {
 }
 
 type serializedStringTuples struct {
-	l      int
-	b      []byte
-	lookup func(uint32) (string, error)
+	idsCount int
+	idsBytes []byte // bytes containing the ids pointing to the string in the lookup table.
+	lookup   func(uint32) (string, error)
 }
 
 func (t *serializedStringTuples) Len() int {
-	return len(t.b) / (4 * t.l)
+	return len(t.idsBytes) / (4 * t.idsCount)
 }
 
 func (t *serializedStringTuples) At(i int) ([]string, error) {
-	if len(t.b) < (i+t.l)*4 {
+	if len(t.idsBytes) < (i+t.idsCount)*4 {
 		return nil, errInvalidSize
 	}
-	res := make([]string, 0, t.l)
+	res := make([]string, 0, t.idsCount)
 
-	for k := 0; k < t.l; k++ {
-		offset := binary.BigEndian.Uint32(t.b[(i+k)*4:])
+	for k := 0; k < t.idsCount; k++ {
+		offset := binary.BigEndian.Uint32(t.idsBytes[(i+k)*4:])
 
 		s, err := t.lookup(offset)
 		if err != nil {
@@ -1038,7 +1063,7 @@ func (dec *Decoder) Series(b []byte, lbls *labels.Labels, chks *[]chunks.Meta) e
 
 	d := decbuf{b: b}
 
-	k := int(d.uvarint())
+	k := d.uvarint()
 
 	for i := 0; i < k; i++ {
 		lno := uint32(d.uvarint())
@@ -1061,7 +1086,7 @@ func (dec *Decoder) Series(b []byte, lbls *labels.Labels, chks *[]chunks.Meta) e
 	}
 
 	// Read the chunks meta data.
-	k = int(d.uvarint())
+	k = d.uvarint()
 
 	if k == 0 {
 		return nil
