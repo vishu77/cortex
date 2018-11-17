@@ -3,6 +3,7 @@ package cassandra
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/chunk/testutils"
@@ -48,7 +49,7 @@ func Fixtures() ([]testutils.Fixture, error) {
 	}
 
 	// Get a SchemaConfig with the defaults.
-	schemaConfig := chunk.DefaultSchemaConfig("cassandra", "v1", model.Now())
+	schemaConfig := chunk.DefaultSchemaConfig("cassandra", "v1", model.Now().Add(-time.Hour))
 
 	storageClient, err := NewStorageClient(cfg, schemaConfig)
 	if err != nil {
