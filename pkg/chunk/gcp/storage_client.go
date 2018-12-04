@@ -10,6 +10,8 @@ import (
 	"cloud.google.com/go/bigtable"
 	ot "github.com/opentracing/opentracing-go"
 	otlog "github.com/opentracing/opentracing-go/log"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	chunk_util "github.com/cortexproject/cortex/pkg/chunk/util"
@@ -30,6 +32,8 @@ type Config struct {
 	project  string
 	instance string
 
+	grpcMaxRecvMsgSize int
+
 	ColumnKey bool
 }
 
@@ -37,6 +41,7 @@ type Config struct {
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.project, "bigtable.project", "", "Bigtable project ID.")
 	f.StringVar(&cfg.instance, "bigtable.instance", "", "Bigtable instance ID.")
+	f.IntVar(&cfg.grpcMaxRecvMsgSize, "bigtable.max-recv-msg-size", 100<<20, "Bigtable grpc max receive message size.")
 }
 
 // storageClientColumnKey implements chunk.storageClient for GCP.
@@ -54,7 +59,10 @@ type storageClientV1 struct {
 
 // NewStorageClientV1 returns a new v1 StorageClient.
 func NewStorageClientV1(ctx context.Context, cfg Config, schemaCfg chunk.SchemaConfig) (chunk.StorageClient, error) {
-	client, err := bigtable.NewClient(ctx, cfg.project, cfg.instance, instrumentation()...)
+	opts := instrumentation()
+	opts = append(opts, option.WithGRPCDialOption(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(cfg.grpcMaxRecvMsgSize))))
+
+	client, err := bigtable.NewClient(ctx, cfg.project, cfg.instance, opts...)
 	if err != nil {
 		return nil, err
 	}
