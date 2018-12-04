@@ -41,7 +41,7 @@ type unifiedChunkQuerier struct {
 }
 
 // Select implements storage.Querier.
-func (q *unifiedChunkQuerier) Select(sp *storage.SelectParams, matchers ...*labels.Matcher) (storage.SeriesSet, error) {
+func (q *unifiedChunkQuerier) Select(sp *storage.SelectParams, matchers ...*labels.Matcher) (storage.SeriesSet, error, storage.Warnings) {
 	if sp == nil {
 		return q.metadataQuery(matchers...)
 	}
@@ -63,11 +63,11 @@ func (q *unifiedChunkQuerier) Select(sp *storage.SelectParams, matchers ...*labe
 	for range q.stores {
 		select {
 		case err := <-errs:
-			return nil, err
+			return nil, err, nil
 		case cs := <-css:
 			chunks = append(chunks, cs...)
 		}
 	}
 
-	return q.csq.partitionChunks(chunks), nil
+	return q.csq.partitionChunks(chunks), nil, nil
 }
