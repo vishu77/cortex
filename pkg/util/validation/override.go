@@ -241,3 +241,15 @@ func (o *Overrides) MaxQueryLength(userID string) time.Duration {
 		return l.MaxQueryLength
 	})
 }
+
+// GetOverrideUsers returns an array of users with custom overrides
+func (o *Overrides) GetOverrideUsers() []string {
+	o.overridesMtx.RLock()
+	defer o.overridesMtx.RUnlock()
+	users := make([]string, 0, len(o.overrides))
+	for u := range o.overrides {
+		users = append(users, u)
+	}
+
+	return users
+}
