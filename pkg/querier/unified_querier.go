@@ -41,6 +41,7 @@ type unifiedChunkQuerier struct {
 }
 
 func (q *unifiedChunkQuerier) Get(ctx context.Context, from, through model.Time, matchers ...*labels.Matcher) ([]chunk.Chunk, error) {
+
 	css := make(chan []chunk.Chunk, len(q.stores))
 	errs := make(chan error, len(q.stores))
 	for _, store := range q.stores {
@@ -67,15 +68,15 @@ func (q *unifiedChunkQuerier) Get(ctx context.Context, from, through model.Time,
 }
 
 // Select implements storage.Querier.
-func (q *unifiedChunkQuerier) Select(sp *storage.SelectParams, matchers ...*labels.Matcher) (storage.SeriesSet, error) {
+func (q *unifiedChunkQuerier) Select(sp *storage.SelectParams, matchers ...*labels.Matcher) (storage.SeriesSet, error, storage.Warnings) {
 	if sp == nil {
 		return q.metadataQuery(matchers...)
 	}
 
 	chunks, err := q.Get(q.ctx, model.Time(sp.Start), model.Time(sp.End), matchers...)
 	if err != nil {
-		return nil, err
+		return nil, err, nil
 	}
 
-	return q.csq.partitionChunks(chunks), nil
+	return q.csq.partitionChunks(chunks), nil, nil
 }

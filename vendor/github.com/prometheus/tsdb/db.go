@@ -112,13 +112,9 @@ type DB struct {
 	donec    chan struct{}
 	stopc    chan struct{}
 
-	// cmtx ensures that compactions and deletions don't run simultaneously.
-	cmtx sync.Mutex
-
-	// autoCompactMtx ensures that no compaction gets triggered while
-	// changing the autoCompact var.
-	autoCompactMtx sync.Mutex
-	autoCompact    bool
+	// cmtx is used to control compactions and deletions.
+	cmtx               sync.Mutex
+	compactionsEnabled bool
 }
 
 type dbMetrics struct {
@@ -127,7 +123,6 @@ type dbMetrics struct {
 	reloads              prometheus.Counter
 	reloadsFailed        prometheus.Counter
 	compactionsTriggered prometheus.Counter
-	compactionsSkipped   prometheus.Counter
 	cutoffs              prometheus.Counter
 	cutoffsFailed        prometheus.Counter
 	startTime            prometheus.GaugeFunc
@@ -169,10 +164,6 @@ func newDBMetrics(db *DB, r prometheus.Registerer) *dbMetrics {
 	m.compactionsTriggered = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "prometheus_tsdb_compactions_triggered_total",
 		Help: "Total number of triggered compactions for the partition.",
-	})
-	m.compactionsSkipped = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "prometheus_tsdb_compactions_skipped_total",
-		Help: "Total number of skipped compactions due to disabled auto compaction.",
 	})
 	m.cutoffs = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "prometheus_tsdb_retention_cutoffs_total",
@@ -235,14 +226,14 @@ func Open(dir string, l log.Logger, r prometheus.Registerer, opts *Options) (db 
 	}
 
 	db = &DB{
-		dir:         dir,
-		logger:      l,
-		opts:        opts,
-		compactc:    make(chan struct{}, 1),
-		donec:       make(chan struct{}),
-		stopc:       make(chan struct{}),
-		autoCompact: true,
-		chunkPool:   chunkenc.NewPool(),
+		dir:                dir,
+		logger:             l,
+		opts:               opts,
+		compactc:           make(chan struct{}, 1),
+		donec:              make(chan struct{}),
+		stopc:              make(chan struct{}),
+		compactionsEnabled: true,
+		chunkPool:          chunkenc.NewPool(),
 	}
 	db.metrics = newDBMetrics(db, r)
 
@@ -271,11 +262,11 @@ func Open(dir string, l log.Logger, r prometheus.Registerer, opts *Options) (db 
 	if err != nil {
 		return nil, err
 	}
-	if err := db.head.Init(); err != nil {
-		return nil, errors.Wrap(err, "read WAL")
-	}
 	if err := db.reload(); err != nil {
 		return nil, err
+	}
+	if err := db.head.Init(); err != nil {
+		return nil, errors.Wrap(err, "read WAL")
 	}
 
 	go db.run()
@@ -309,18 +300,14 @@ func (db *DB) run() {
 		case <-db.compactc:
 			db.metrics.compactionsTriggered.Inc()
 
-			db.autoCompactMtx.Lock()
-			if db.autoCompact {
-				if err := db.compact(); err != nil {
-					level.Error(db.logger).Log("msg", "compaction failed", "err", err)
-					backoff = exponential(backoff, 1*time.Second, 1*time.Minute)
-				} else {
-					backoff = 0
-				}
+			err := db.compact()
+			if err != nil {
+				level.Error(db.logger).Log("msg", "compaction failed", "err", err)
+				backoff = exponential(backoff, 1*time.Second, 1*time.Minute)
 			} else {
-				db.metrics.compactionsSkipped.Inc()
+				backoff = 0
 			}
-			db.autoCompactMtx.Unlock()
+
 		case <-db.stopc:
 			return
 		}
@@ -382,6 +369,11 @@ func (a dbAppender) Commit() error {
 func (db *DB) compact() (err error) {
 	db.cmtx.Lock()
 	defer db.cmtx.Unlock()
+
+	if !db.compactionsEnabled {
+		return nil
+	}
+
 	// Check whether we have pending head blocks that are ready to be persisted.
 	// They have the highest priority.
 	for {
@@ -739,21 +731,21 @@ func (db *DB) Close() error {
 	return merr.Err()
 }
 
-// DisableCompactions disables auto compactions.
+// DisableCompactions disables compactions.
 func (db *DB) DisableCompactions() {
-	db.autoCompactMtx.Lock()
-	defer db.autoCompactMtx.Unlock()
+	db.cmtx.Lock()
+	defer db.cmtx.Unlock()
 
-	db.autoCompact = false
+	db.compactionsEnabled = false
 	level.Info(db.logger).Log("msg", "compactions disabled")
 }
 
-// EnableCompactions enables auto compactions.
+// EnableCompactions enables compactions.
 func (db *DB) EnableCompactions() {
-	db.autoCompactMtx.Lock()
-	defer db.autoCompactMtx.Unlock()
+	db.cmtx.Lock()
+	defer db.cmtx.Unlock()
 
-	db.autoCompact = true
+	db.compactionsEnabled = true
 	level.Info(db.logger).Log("msg", "compactions enabled")
 }
 

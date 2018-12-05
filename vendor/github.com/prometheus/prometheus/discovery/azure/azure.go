@@ -47,6 +47,7 @@ const (
 	azureLabelMachinePrivateIP     = azureLabel + "machine_private_ip"
 	azureLabelMachineTag           = azureLabel + "machine_tag_"
 	azureLabelMachineScaleSet      = azureLabel + "machine_scale_set"
+	azureLabelPowerState           = azureLabel + "machine_power_state"
 )
 
 var (
@@ -65,17 +66,26 @@ var (
 	DefaultSDConfig = SDConfig{
 		Port:            80,
 		RefreshInterval: model.Duration(5 * time.Minute),
+		Environment:     azure.PublicCloud.Name,
 	}
 )
 
 // SDConfig is the configuration for Azure based service discovery.
 type SDConfig struct {
+	Environment     string             `yaml:"environment,omitempty"`
 	Port            int                `yaml:"port"`
 	SubscriptionID  string             `yaml:"subscription_id"`
 	TenantID        string             `yaml:"tenant_id,omitempty"`
 	ClientID        string             `yaml:"client_id,omitempty"`
 	ClientSecret    config_util.Secret `yaml:"client_secret,omitempty"`
 	RefreshInterval model.Duration     `yaml:"refresh_interval,omitempty"`
+}
+
+func validateAuthParam(param, name string) error {
+	if len(param) == 0 {
+		return fmt.Errorf("Azure SD configuration requires a %s", name)
+	}
+	return nil
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.
@@ -86,8 +96,17 @@ func (c *SDConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if err != nil {
 		return err
 	}
-	if c.SubscriptionID == "" {
-		return fmt.Errorf("Azure SD configuration requires a subscription_id")
+	if err = validateAuthParam(c.SubscriptionID, "subscription_id"); err != nil {
+		return err
+	}
+	if err = validateAuthParam(c.TenantID, "tenant_id"); err != nil {
+		return err
+	}
+	if err = validateAuthParam(c.ClientID, "client_id"); err != nil {
+		return err
+	}
+	if err = validateAuthParam(string(c.ClientSecret), "client_secret"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -159,27 +178,37 @@ type azureClient struct {
 
 // createAzureClient is a helper function for creating an Azure compute client to ARM.
 func createAzureClient(cfg SDConfig) (azureClient, error) {
+	env, err := azure.EnvironmentFromName(cfg.Environment)
+	if err != nil {
+		return azureClient{}, err
+	}
+
+	activeDirectoryEndpoint := env.ActiveDirectoryEndpoint
+	resourceManagerEndpoint := env.ResourceManagerEndpoint
+
 	var c azureClient
-	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, cfg.TenantID)
+	oauthConfig, err := adal.NewOAuthConfig(activeDirectoryEndpoint, cfg.TenantID)
 	if err != nil {
 		return azureClient{}, err
 	}
-	spt, err := adal.NewServicePrincipalToken(*oauthConfig, cfg.ClientID, string(cfg.ClientSecret), azure.PublicCloud.ResourceManagerEndpoint)
+	spt, err := adal.NewServicePrincipalToken(*oauthConfig, cfg.ClientID, string(cfg.ClientSecret), resourceManagerEndpoint)
 	if err != nil {
 		return azureClient{}, err
 	}
 
-	c.vm = compute.NewVirtualMachinesClient(cfg.SubscriptionID)
-	c.vm.Authorizer = autorest.NewBearerAuthorizer(spt)
+	bearerAuthorizer := autorest.NewBearerAuthorizer(spt)
 
-	c.nic = network.NewInterfacesClient(cfg.SubscriptionID)
-	c.nic.Authorizer = autorest.NewBearerAuthorizer(spt)
+	c.vm = compute.NewVirtualMachinesClientWithBaseURI(resourceManagerEndpoint, cfg.SubscriptionID)
+	c.vm.Authorizer = bearerAuthorizer
 
-	c.vmss = compute.NewVirtualMachineScaleSetsClient(cfg.SubscriptionID)
-	c.vmss.Authorizer = autorest.NewBearerAuthorizer(spt)
+	c.nic = network.NewInterfacesClientWithBaseURI(resourceManagerEndpoint, cfg.SubscriptionID)
+	c.nic.Authorizer = bearerAuthorizer
 
-	c.vmssvm = compute.NewVirtualMachineScaleSetVMsClient(cfg.SubscriptionID)
-	c.vmssvm.Authorizer = autorest.NewBearerAuthorizer(spt)
+	c.vmss = compute.NewVirtualMachineScaleSetsClientWithBaseURI(resourceManagerEndpoint, cfg.SubscriptionID)
+	c.vmss.Authorizer = bearerAuthorizer
+
+	c.vmssvm = compute.NewVirtualMachineScaleSetVMsClientWithBaseURI(resourceManagerEndpoint, cfg.SubscriptionID)
+	c.vmssvm.Authorizer = bearerAuthorizer
 
 	return c, nil
 }
@@ -200,13 +229,14 @@ type virtualMachine struct {
 	ScaleSet       string
 	Tags           map[string]*string
 	NetworkProfile compute.NetworkProfile
+	PowerStateCode string
 }
 
 // Create a new azureResource object from an ID string.
 func newAzureResourceFromID(id string, logger log.Logger) (azureResource, error) {
 	// Resource IDs have the following format.
 	// /subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/PROVIDER/TYPE/NAME
-	// or if embeded resource then
+	// or if embedded resource then
 	// /subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/PROVIDER/TYPE/NAME/TYPE/NAME
 	s := strings.Split(id, "/")
 	if len(s) != 9 && len(s) != 11 {
@@ -274,12 +304,21 @@ func (d *Discovery) refresh() (tg *targetgroup.Group, err error) {
 				return
 			}
 
+			// We check if the virtual machine has been deallocated.
+			// If so, we skip them in service discovery.
+			if strings.EqualFold(vm.PowerStateCode, "PowerState/deallocated") {
+				level.Debug(d.logger).Log("msg", "Skipping virtual machine", "machine", vm.Name, "power_state", vm.PowerStateCode)
+				ch <- target{}
+				return
+			}
+
 			labels := model.LabelSet{
 				azureLabelMachineID:            model.LabelValue(vm.ID),
 				azureLabelMachineName:          model.LabelValue(vm.Name),
 				azureLabelMachineOSType:        model.LabelValue(vm.OsType),
 				azureLabelMachineLocation:      model.LabelValue(vm.Location),
 				azureLabelMachineResourceGroup: model.LabelValue(r.ResourceGroup),
+				azureLabelPowerState:           model.LabelValue(vm.PowerStateCode),
 			}
 
 			if vm.ScaleSet != "" {
@@ -303,14 +342,8 @@ func (d *Discovery) refresh() (tg *targetgroup.Group, err error) {
 					return
 				}
 
-				// Unfortunately Azure does not return information on whether a VM is deallocated.
-				// This information is available via another API call however the Go SDK does not
-				// yet support this. On deallocated machines, this value happens to be nil so it
-				// is a cheap and easy way to determine if a machine is allocated or not.
-				if networkInterface.Properties.Primary == nil {
-					level.Debug(d.logger).Log("msg", "Skipping deallocated virtual machine", "machine", vm.Name)
-					ch <- target{}
-					return
+				if networkInterface.Properties == nil {
+					continue
 				}
 
 				if *networkInterface.Properties.Primary {
@@ -347,7 +380,7 @@ func (d *Discovery) refresh() (tg *targetgroup.Group, err error) {
 }
 
 func (client *azureClient) getVMs() ([]virtualMachine, error) {
-	vms := []virtualMachine{}
+	var vms []virtualMachine
 	result, err := client.vm.ListAll()
 	if err != nil {
 		return vms, fmt.Errorf("could not list virtual machines: %s", err)
@@ -373,7 +406,7 @@ func (client *azureClient) getVMs() ([]virtualMachine, error) {
 }
 
 func (client *azureClient) getScaleSets() ([]compute.VirtualMachineScaleSet, error) {
-	scaleSets := []compute.VirtualMachineScaleSet{}
+	var scaleSets []compute.VirtualMachineScaleSet
 	result, err := client.vmss.ListAll()
 	if err != nil {
 		return scaleSets, fmt.Errorf("could not list virtual machine scale sets: %s", err)
@@ -392,7 +425,7 @@ func (client *azureClient) getScaleSets() ([]compute.VirtualMachineScaleSet, err
 }
 
 func (client *azureClient) getScaleSetVMs(scaleSet compute.VirtualMachineScaleSet) ([]virtualMachine, error) {
-	vms := []virtualMachine{}
+	var vms []virtualMachine
 	//TODO do we really need to fetch the resourcegroup this way?
 	r, err := newAzureResourceFromID(*scaleSet.ID, nil)
 
@@ -440,6 +473,7 @@ func mapFromVM(vm compute.VirtualMachine) virtualMachine {
 		ScaleSet:       "",
 		Tags:           tags,
 		NetworkProfile: *(vm.Properties.NetworkProfile),
+		PowerStateCode: getPowerStateFromVMInstanceView(vm.Properties.InstanceView),
 	}
 }
 
@@ -460,6 +494,7 @@ func mapFromVMScaleSetVM(vm compute.VirtualMachineScaleSetVM, scaleSetName strin
 		ScaleSet:       scaleSetName,
 		Tags:           tags,
 		NetworkProfile: *(vm.Properties.NetworkProfile),
+		PowerStateCode: getPowerStateFromVMInstanceView(vm.Properties.InstanceView),
 	}
 }
 
@@ -491,4 +526,17 @@ func (client *azureClient) getNetworkInterfaceByID(networkInterfaceID string) (n
 	}
 
 	return result, nil
+}
+
+func getPowerStateFromVMInstanceView(instanceView *compute.VirtualMachineInstanceView) (powerState string) {
+	if instanceView.Statuses == nil {
+		return
+	}
+	for _, ivs := range *instanceView.Statuses {
+		code := *(ivs.Code)
+		if strings.HasPrefix(code, "PowerState") {
+			powerState = code
+		}
+	}
+	return
 }

@@ -89,7 +89,7 @@ var (
 	// DefaultAlertmanagerConfig is the default alertmanager configuration.
 	DefaultAlertmanagerConfig = AlertmanagerConfig{
 		Scheme:  "http",
-		Timeout: 10 * time.Second,
+		Timeout: model.Duration(10 * time.Second),
 	}
 
 	// DefaultRelabelConfig is the default Relabel configuration.
@@ -116,12 +116,12 @@ var (
 		// By default, buffer 100 batches, which at 100ms per batch is 10s. At
 		// 1000 shards, this will buffer 10M samples total.
 		Capacity:          100 * 100,
-		BatchSendDeadline: 5 * time.Second,
+		BatchSendDeadline: model.Duration(5 * time.Second),
 
 		// Max number of times to retry a batch on recoverable errors.
 		MaxRetries: 3,
-		MinBackoff: 30 * time.Millisecond,
-		MaxBackoff: 100 * time.Millisecond,
+		MinBackoff: model.Duration(30 * time.Millisecond),
+		MaxBackoff: model.Duration(100 * time.Millisecond),
 	}
 
 	// DefaultRemoteReadConfig is the default remote read configuration.
@@ -233,6 +233,9 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	// Do global overrides and validate unique names.
 	jobNames := map[string]struct{}{}
 	for _, scfg := range c.ScrapeConfigs {
+		if scfg == nil {
+			return fmt.Errorf("empty or null scrape config section")
+		}
 		// First set the correct scrape interval, then check that the timeout
 		// (inferred or explicit) is not greater than that.
 		if scfg.ScrapeInterval == 0 {
@@ -253,6 +256,16 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			return fmt.Errorf("found multiple scrape configs with job name %q", scfg.JobName)
 		}
 		jobNames[scfg.JobName] = struct{}{}
+	}
+	for _, rwcfg := range c.RemoteWriteConfigs {
+		if rwcfg == nil {
+			return fmt.Errorf("empty or null remote write config section")
+		}
+	}
+	for _, rrcfg := range c.RemoteReadConfigs {
+		if rrcfg == nil {
+			return fmt.Errorf("empty or null remote read config section")
+		}
 	}
 	return nil
 }
@@ -360,6 +373,13 @@ func (c *ScrapeConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 
+	// The UnmarshalYAML method of ServiceDiscoveryConfig is not being called because it's not a pointer.
+	// We cannot make it a pointer as the parser panics for inlined pointer structs.
+	// Thus we just do its validation here.
+	if err := c.ServiceDiscoveryConfig.Validate(); err != nil {
+		return err
+	}
+
 	// Check for users putting URLs in target groups.
 	if len(c.RelabelConfigs) == 0 {
 		for _, tg := range c.ServiceDiscoveryConfig.StaticConfigs {
@@ -368,6 +388,17 @@ func (c *ScrapeConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 					return err
 				}
 			}
+		}
+	}
+
+	for _, rlcfg := range c.RelabelConfigs {
+		if rlcfg == nil {
+			return fmt.Errorf("empty or null target relabeling rule in scrape config")
+		}
+	}
+	for _, rlcfg := range c.MetricRelabelConfigs {
+		if rlcfg == nil {
+			return fmt.Errorf("empty or null metric relabeling rule in scrape config")
 		}
 	}
 
@@ -392,7 +423,16 @@ func (c *AlertingConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 	// by the default due to the YAML parser behavior for empty blocks.
 	*c = AlertingConfig{}
 	type plain AlertingConfig
-	return unmarshal((*plain)(c))
+	if err := unmarshal((*plain)(c)); err != nil {
+		return err
+	}
+
+	for _, rlcfg := range c.AlertRelabelConfigs {
+		if rlcfg == nil {
+			return fmt.Errorf("empty or null alert relabeling rule")
+		}
+	}
+	return nil
 }
 
 // AlertmanagerConfig configures how Alertmanagers can be discovered and communicated with.
@@ -408,7 +448,7 @@ type AlertmanagerConfig struct {
 	// Path prefix to add in front of the push endpoint path.
 	PathPrefix string `yaml:"path_prefix,omitempty"`
 	// The timeout used when sending alerts.
-	Timeout time.Duration `yaml:"timeout,omitempty"`
+	Timeout model.Duration `yaml:"timeout,omitempty"`
 
 	// List of Alertmanager relabel configurations.
 	RelabelConfigs []*RelabelConfig `yaml:"relabel_configs,omitempty"`
@@ -429,6 +469,13 @@ func (c *AlertmanagerConfig) UnmarshalYAML(unmarshal func(interface{}) error) er
 		return err
 	}
 
+	// The UnmarshalYAML method of ServiceDiscoveryConfig is not being called because it's not a pointer.
+	// We cannot make it a pointer as the parser panics for inlined pointer structs.
+	// Thus we just do its validation here.
+	if err := c.ServiceDiscoveryConfig.Validate(); err != nil {
+		return err
+	}
+
 	// Check for users putting URLs in target groups.
 	if len(c.RelabelConfigs) == 0 {
 		for _, tg := range c.ServiceDiscoveryConfig.StaticConfigs {
@@ -437,6 +484,12 @@ func (c *AlertmanagerConfig) UnmarshalYAML(unmarshal func(interface{}) error) er
 					return err
 				}
 			}
+		}
+	}
+
+	for _, rlcfg := range c.RelabelConfigs {
+		if rlcfg == nil {
+			return fmt.Errorf("empty or null Alertmanager target relabeling rule")
 		}
 	}
 
@@ -563,7 +616,7 @@ func (c *RelabelConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
-// Regexp encapsulates a regexp.Regexp and makes it YAML marshallable.
+// Regexp encapsulates a regexp.Regexp and makes it YAML marshalable.
 type Regexp struct {
 	*regexp.Regexp
 	original string
@@ -632,6 +685,11 @@ func (c *RemoteWriteConfig) UnmarshalYAML(unmarshal func(interface{}) error) err
 	if c.URL == nil {
 		return fmt.Errorf("url for remote_write is empty")
 	}
+	for _, rlcfg := range c.WriteRelabelConfigs {
+		if rlcfg == nil {
+			return fmt.Errorf("empty or null relabeling rule in remote write config")
+		}
+	}
 
 	// The UnmarshalYAML method of HTTPClientConfig is not being called because it's not a pointer.
 	// We cannot make it a pointer as the parser panics for inlined pointer structs.
@@ -652,14 +710,14 @@ type QueueConfig struct {
 	MaxSamplesPerSend int `yaml:"max_samples_per_send,omitempty"`
 
 	// Maximum time sample will wait in buffer.
-	BatchSendDeadline time.Duration `yaml:"batch_send_deadline,omitempty"`
+	BatchSendDeadline model.Duration `yaml:"batch_send_deadline,omitempty"`
 
 	// Max number of times to retry a batch on recoverable errors.
 	MaxRetries int `yaml:"max_retries,omitempty"`
 
 	// On recoverable errors, backoff exponentially.
-	MinBackoff time.Duration `yaml:"min_backoff,omitempty"`
-	MaxBackoff time.Duration `yaml:"max_backoff,omitempty"`
+	MinBackoff model.Duration `yaml:"min_backoff,omitempty"`
+	MaxBackoff model.Duration `yaml:"max_backoff,omitempty"`
 }
 
 // RemoteReadConfig is the configuration for reading from remote storage.

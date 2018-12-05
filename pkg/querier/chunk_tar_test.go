@@ -50,7 +50,11 @@ func TestChunkTar(t *testing.T) {
 
 	store := mockChunkStore{chunks}
 	queryable := newChunkStoreQueryable(store, batch.NewChunkMergeIterator)
-	engine := promql.NewEngine(util.Logger, nil, 10, 1*time.Minute)
+	engine := promql.NewEngine(promql.EngineOpts{
+		Logger:        util.Logger,
+		MaxConcurrent: 10,
+		Timeout:       1 * time.Minute,
+	})
 	rangeQuery, err := engine.NewRangeQuery(queryable, query, from, through, step)
 	require.NoError(t, err)
 
