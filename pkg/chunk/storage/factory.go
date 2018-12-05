@@ -12,6 +12,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/chunk/cache"
 	"github.com/cortexproject/cortex/pkg/chunk/cassandra"
 	"github.com/cortexproject/cortex/pkg/chunk/gcp"
+	"github.com/cortexproject/cortex/pkg/chunk/local"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/validation"
 	"github.com/go-kit/kit/log/level"
@@ -24,6 +25,7 @@ type Config struct {
 	GCPStorageConfig       gcp.Config
 	GCSConfig              gcp.GCSConfig
 	CassandraStorageConfig cassandra.Config
+	BoltDBConfig           local.BoltDBConfig
 
 	IndexCacheSize     int
 	IndexCacheValidity time.Duration
@@ -134,6 +136,8 @@ func NewIndexClient(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chun
 		return gcp.NewStorageClientColumnKey(context.Background(), cfg.GCPStorageConfig, schemaCfg)
 	case "cassandra":
 		return cassandra.NewStorageClient(cfg.CassandraStorageConfig, schemaCfg)
+	case "boltdb":
+		return local.NewBoltDBIndexClient(cfg.BoltDBConfig), nil
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, cassandra, inmemory", name)
 	}
@@ -182,6 +186,8 @@ func NewTableClient(name string, cfg Config) (chunk.TableClient, error) {
 		return gcp.NewTableClient(context.Background(), cfg.GCPStorageConfig)
 	case "cassandra":
 		return cassandra.NewTableClient(context.Background(), cfg.CassandraStorageConfig)
+	case "boltdb":
+		return local.NewTableClient()
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, inmemory", name)
 	}
