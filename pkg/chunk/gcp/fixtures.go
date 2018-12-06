@@ -54,16 +54,8 @@ func (f *fixture) Clients() (
 		return
 	}
 
-	schemaConfig = chunk.SchemaConfig{
-		Configs: []chunk.PeriodConfig{{
-			Store: "gcp",
-			From:  model.Now(),
-			ChunkTables: chunk.PeriodicTableConfig{
-				Prefix: "chunks",
-				Period: 10 * time.Minute,
-			},
-		}},
-	}
+	schemaConfig = chunk.DefaultSchemaConfig("gcp-columnkey", "v1", model.Now().Add(-time.Hour))
+
 	tClient = &tableClient{
 		client: adminClient,
 	}
