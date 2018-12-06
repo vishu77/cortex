@@ -291,8 +291,12 @@ func mergeTwoLabelValueLists(a, b model.LabelValues) model.LabelValues {
 		if a[i] < b[j] {
 			result = append(result, a[i])
 			i++
+		} else if a[i] > b[j] {
+			result = append(result, b[j])
+			j++
 		} else {
 			result = append(result, b[j])
+			i++
 			j++
 		}
 	}
@@ -324,8 +328,12 @@ func mergeTwoLabelNameLists(a, b model.LabelNames) model.LabelNames {
 		if a[i] < b[j] {
 			result = append(result, a[i])
 			i++
+		} else if a[i] > b[j] {
+			result = append(result, b[j])
+			j++
 		} else {
 			result = append(result, b[j])
+			i++
 			j++
 		}
 	}
