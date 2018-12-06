@@ -25,6 +25,8 @@ type Overrides struct {
 	overridesMtx sync.RWMutex
 	overrides    map[string]*Limits
 	quit         chan struct{}
+
+	numTokensDesc *prometheus.Desc
 }
 
 // NewOverrides makes a new Overrides.
@@ -242,14 +244,17 @@ func (o *Overrides) MaxQueryLength(userID string) time.Duration {
 	})
 }
 
-// GetOverrideUsers returns an array of users with custom overrides
-func (o *Overrides) GetOverrideUsers() []string {
+// Describe implements prometheus.Collector.
+func (o *Overrides) Describe(ch chan<- *prometheus.Desc) {
+	o.Defaults.Describe(ch)
+}
+
+// Collect implements prometheus.Collector.
+func (o *Overrides) Collect(ch chan<- prometheus.Metric) {
 	o.overridesMtx.RLock()
 	defer o.overridesMtx.RUnlock()
-	users := make([]string, 0, len(o.overrides))
-	for u := range o.overrides {
-		users = append(users, u)
+	o.Defaults.Collect("default", ch)
+	for u, l := range o.overrides {
+		l.Collect(u, ch)
 	}
-
-	return users
 }

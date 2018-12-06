@@ -5,6 +5,52 @@ import (
 	"time"
 
 	"github.com/cortexproject/cortex/pkg/util/flagext"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var (
+	ingestionRateDesc = prometheus.NewDesc(
+		"cortex_limits_ingestion_rate",
+		"size of limit to how many samples a user can ingest per second",
+		[]string{"user"},
+		nil,
+	)
+	ingestionBurstSize = prometheus.NewDesc(
+		"cortex_limits_ingestion_burst_size",
+		"Size of ingestion rate limit over short periods of time",
+		[]string{"user"},
+		nil,
+	)
+	maxSeriesPerQueryDesc = prometheus.NewDesc(
+		"cortex_limits_max_series_per_query",
+		"Maximum number of series in a single query",
+		[]string{"user"},
+		nil,
+	)
+	maxSamplesPerQueryDesc = prometheus.NewDesc(
+		"cortex_limits_max_samples_per_query",
+		"Maximum number of samples allowed in a single query",
+		[]string{"user"},
+		nil,
+	)
+	maxSeriesPerUserDesc = prometheus.NewDesc(
+		"cortex_limits_max_series_per_user",
+		"Maximum number of series a user can maintain",
+		[]string{"user"},
+		nil,
+	)
+	maxSeriesPerMetricDesc = prometheus.NewDesc(
+		"cortex_limits_max_series_per_metric",
+		"Maximum number of series allowed for a single metric",
+		[]string{"user"},
+		nil,
+	)
+	maxChunksPerQuery = prometheus.NewDesc(
+		"cortex_limits_max_chunks_per_query",
+		"Maximum number of chunks in a single query",
+		[]string{"user"},
+		nil,
+	)
 )
 
 // Limits describe all the limits for users; can be used to describe global default
@@ -33,6 +79,63 @@ type Limits struct {
 	// Config for overrides, convenient if it goes here.
 	PerTenantOverrideConfig string
 	PerTenantOverridePeriod time.Duration
+}
+
+// Describe implements prometheus.Collector.
+func (l *Limits) Describe(ch chan<- *prometheus.Desc) {
+	ch <- ingestionRateDesc
+	ch <- ingestionBurstSize
+	ch <- maxSeriesPerQueryDesc
+	ch <- maxSamplesPerQueryDesc
+	ch <- maxSeriesPerUserDesc
+	ch <- maxSeriesPerMetricDesc
+	ch <- maxChunksPerQuery
+}
+
+// Collect implements prometheus.Collector.
+func (l *Limits) Collect(user string, ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(
+		ingestionRateDesc,
+		prometheus.GaugeValue,
+		l.IngestionRate,
+		user,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		ingestionBurstSize,
+		prometheus.GaugeValue,
+		float64(l.IngestionBurstSize),
+		user,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		maxSeriesPerQueryDesc,
+		prometheus.GaugeValue,
+		float64(l.MaxSeriesPerQuery),
+		user,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		maxSamplesPerQueryDesc,
+		prometheus.GaugeValue,
+		float64(l.MaxSamplesPerQuery),
+		user,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		maxSeriesPerUserDesc,
+		prometheus.GaugeValue,
+		float64(l.MaxSeriesPerUser),
+		user,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		maxSeriesPerMetricDesc,
+		prometheus.GaugeValue,
+		float64(l.MaxSeriesPerMetric),
+		user,
+	)
+	ch <- prometheus.MustNewConstMetric(
+		maxChunksPerQuery,
+		prometheus.GaugeValue,
+		float64(l.MaxChunksPerQuery),
+		user,
+	)
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet
