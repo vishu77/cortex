@@ -40,6 +40,11 @@ var (
 		Name:      "query_frontend_queue_length",
 		Help:      "Number of queries in the queue.",
 	})
+	failedRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "cortex",
+		Name:      "query_frontend_failed_requests_total",
+		Help:      "Total count of dropped write backs to cache.",
+	}, []string{"user", "reason"})
 
 	errServerClosing  = httpgrpc.Errorf(http.StatusTeapot, "server closing down")
 	errTooManyRequest = httpgrpc.Errorf(http.StatusTooManyRequests, "too many outstanding requests")
@@ -304,6 +309,7 @@ func (f *Frontend) queueRequest(ctx context.Context, req *request) error {
 		f.cond.Broadcast()
 		return nil
 	default:
+		failedRequests.WithLabelValues(userID, "too-many-requests").Inc()
 		return errTooManyRequest
 	}
 }
