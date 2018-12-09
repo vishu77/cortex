@@ -3,6 +3,7 @@ package local
 import (
 	"bytes"
 	"context"
+	"flag"
 	"path"
 	"sync"
 
@@ -21,7 +22,12 @@ const (
 
 // BoltDBConfig for a BoltDB index client.
 type BoltDBConfig struct {
-	dir string
+	Directory string `yaml:"directory"`
+}
+
+// RegisterFlags registers flags.
+func (cfg *BoltDBConfig) RegisterFlags(f *flag.FlagSet) {
+	f.StringVar(&cfg.Directory, "boltdb.dir", "", "Location of BoltDB index files.")
 }
 
 type boltIndexClient struct {
@@ -69,7 +75,7 @@ func (b *boltIndexClient) getDB(name string) (*bolt.DB, error) {
 	}
 
 	// Open the database.
-	db, err := bolt.Open(path.Join(b.cfg.dir, name), 0666, nil)
+	db, err := bolt.Open(path.Join(b.cfg.Directory, name), 0666, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -30,7 +30,7 @@ func (f *fixture) Clients() (
 	}
 
 	indexClient = NewBoltDBIndexClient(BoltDBConfig{
-		dir: f.dirname,
+		Directory: f.dirname,
 	})
 
 	chunkClient = chunk.NewMockStorage()
