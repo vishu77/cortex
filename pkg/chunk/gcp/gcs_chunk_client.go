@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"flag"
 	"io/ioutil"
 
 	"cloud.google.com/go/storage"
@@ -20,7 +21,12 @@ type gcsChunkClient struct {
 
 // GCSConfig is config for the GCS Chunk Client.
 type GCSConfig struct {
-	bucketName string
+	BucketName string `yaml:"bucket_name"`
+}
+
+// RegisterFlags registers flags.
+func (cfg *GCSConfig) RegisterFlags(f *flag.FlagSet) {
+	f.StringVar(&cfg.BucketName, "gcs.bucketname", "", "Name of GCS bucket to put chunks in.")
 }
 
 // NewGCSChunkClient makes a new chunk.ChunkClient that writes chunks to GCS.
@@ -33,7 +39,7 @@ func NewGCSChunkClient(ctx context.Context, cfg GCSConfig, schemaCfg chunk.Schem
 }
 
 func newGCSChunkClient(cfg GCSConfig, schemaCfg chunk.SchemaConfig, client *storage.Client) chunk.ObjectClient {
-	bucket := client.Bucket(cfg.bucketName)
+	bucket := client.Bucket(cfg.BucketName)
 	return &gcsChunkClient{
 		cfg:       cfg,
 		schemaCfg: schemaCfg,

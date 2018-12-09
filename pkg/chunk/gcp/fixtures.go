@@ -83,7 +83,7 @@ func (f *fixture) Clients() (
 
 	if f.gcsChunkClient {
 		cClient = newGCSChunkClient(GCSConfig{
-			bucketName: "chunks",
+			BucketName: "chunks",
 		}, schemaConfig, f.gcssrv.Client())
 	} else {
 		cClient = newBigtableChunkClient(Config{}, schemaConfig, client)

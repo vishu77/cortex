@@ -21,11 +21,11 @@ import (
 
 // Config chooses which storage client to use.
 type Config struct {
-	AWSStorageConfig       aws.StorageConfig
-	GCPStorageConfig       gcp.Config
-	GCSConfig              gcp.GCSConfig
-	CassandraStorageConfig cassandra.Config
-	BoltDBConfig           local.BoltDBConfig
+	AWSStorageConfig       aws.StorageConfig  `yaml:"aws"`
+	GCPStorageConfig       gcp.Config         `yaml:"bigtable"`
+	GCSConfig              gcp.GCSConfig      `yaml:"gcs"`
+	CassandraStorageConfig cassandra.Config   `yaml:"cassandra"`
+	BoltDBConfig           local.BoltDBConfig `yaml:"boltdb"`
 
 	IndexCacheSize     int
 	IndexCacheValidity time.Duration
@@ -38,7 +38,9 @@ type Config struct {
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	cfg.AWSStorageConfig.RegisterFlags(f)
 	cfg.GCPStorageConfig.RegisterFlags(f)
+	cfg.GCSConfig.RegisterFlags(f)
 	cfg.CassandraStorageConfig.RegisterFlags(f)
+	cfg.BoltDBConfig.RegisterFlags(f)
 
 	// Deprecated flags!!
 	f.IntVar(&cfg.IndexCacheSize, "store.index-cache-size", 0, "Deprecated: Use -store.index-cache-read.*; Size of in-memory index cache, 0 to disable.")
