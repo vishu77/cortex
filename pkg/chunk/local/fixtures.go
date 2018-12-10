@@ -33,7 +33,9 @@ func (f *fixture) Clients() (
 		Directory: f.dirname,
 	})
 
-	chunkClient = chunk.NewMockStorage()
+	chunkClient = NewFSObjectClient(FSConfig{
+		Directory: f.dirname,
+	})
 
 	tableClient, err = NewTableClient()
 	if err != nil {
