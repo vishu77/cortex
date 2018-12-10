@@ -41,13 +41,14 @@ func NewFSObjectClient(cfg FSConfig) (chunk.ObjectClient, error) {
 func (fsObjectClient) Stop() {}
 
 func (f *fsObjectClient) PutChunks(_ context.Context, chunks []chunk.Chunk) error {
-	for _, chunk := range chunks {
-		buf, err := chunk.Encode()
+	for i := range chunks {
+		// Encode the chunk first - checksum is calculated as a side effect.
+		buf, err := chunks[i].Encode()
 		if err != nil {
 			return err
 		}
 
-		filename := base64.StdEncoding.EncodeToString([]byte(chunk.ExternalKey()))
+		filename := base64.StdEncoding.EncodeToString([]byte(chunks[i].ExternalKey()))
 		if err := ioutil.WriteFile(path.Join(f.cfg.Directory, filename), buf, 0644); err != nil {
 			return err
 		}
