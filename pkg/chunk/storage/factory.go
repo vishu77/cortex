@@ -141,7 +141,7 @@ func NewIndexClient(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chun
 	case "cassandra":
 		return cassandra.NewStorageClient(cfg.CassandraStorageConfig, schemaCfg)
 	case "boltdb":
-		return local.NewBoltDBIndexClient(cfg.BoltDBConfig), nil
+		return local.NewBoltDBIndexClient(cfg.BoltDBConfig)
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, cassandra, inmemory", name)
 	}
@@ -173,7 +173,7 @@ func NewObjectClient(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chu
 	case "cassandra":
 		return cassandra.NewStorageClient(cfg.CassandraStorageConfig, schemaCfg)
 	case "filesystem":
-		return local.NewFSObjectClient(cfg.FSConfig), nil
+		return local.NewFSObjectClient(cfg.FSConfig)
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, gcp, cassandra, inmemory", name)
 	}

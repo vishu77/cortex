@@ -38,11 +38,15 @@ type boltIndexClient struct {
 }
 
 // NewBoltDBIndexClient creates a new IndexClient that used BoltDB.
-func NewBoltDBIndexClient(cfg BoltDBConfig) chunk.IndexClient {
+func NewBoltDBIndexClient(cfg BoltDBConfig) (chunk.IndexClient, error) {
+	if err := ensureDirectory(cfg.Directory); err != nil {
+		return nil, err
+	}
+
 	return &boltIndexClient{
 		cfg: cfg,
 		dbs: map[string]*bolt.DB{},
-	}
+	}, nil
 }
 
 func (b *boltIndexClient) Stop() {
