@@ -29,13 +29,19 @@ func (f *fixture) Clients() (
 		return
 	}
 
-	indexClient = NewBoltDBIndexClient(BoltDBConfig{
+	indexClient, err = NewBoltDBIndexClient(BoltDBConfig{
 		Directory: f.dirname,
 	})
+	if err != nil {
+		return
+	}
 
-	chunkClient = NewFSObjectClient(FSConfig{
+	chunkClient, err = NewFSObjectClient(FSConfig{
 		Directory: f.dirname,
 	})
+	if err != nil {
+		return
+	}
 
 	tableClient, err = NewTableClient()
 	if err != nil {
