@@ -76,7 +76,7 @@ func (f *fsObjectClient) getChunk(_ context.Context, decodeContext *chunk.Decode
 func ensureDirectory(dir string) error {
 	info, err := os.Stat(dir)
 	if os.IsNotExist(err) {
-		return os.MkdirAll(dir, 0644)
+		return os.MkdirAll(dir, 0777)
 	} else if err == nil && !info.IsDir() {
 		return fmt.Errorf("not a directory: %s", dir)
 	}
