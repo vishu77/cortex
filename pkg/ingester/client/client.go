@@ -12,6 +12,7 @@ import (
 	_ "google.golang.org/grpc/encoding/gzip" // get gzip compressor registered
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/cortexproject/cortex/pkg/util/grpcclient"
 	cortex_middleware "github.com/cortexproject/cortex/pkg/util/middleware"
 	"github.com/weaveworks/common/middleware"
 )
@@ -49,6 +50,7 @@ func MakeIngesterClient(addr string, cfg Config) (HealthAndIngesterClient, error
 			middleware.StreamClientUserHeaderInterceptor,
 			cortex_middleware.PrometheusGRPCStreamInstrumentation(ingesterClientRequestDuration),
 		)),
+		grpc.WithBalancer(grpc.RoundRobin(grpcclient.NewPoolResolver(10))),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(cfg.MaxRecvMsgSize)),
 	}
 	if cfg.legacyCompressToIngester {
